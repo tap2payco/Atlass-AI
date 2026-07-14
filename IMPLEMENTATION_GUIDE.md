@@ -36,7 +36,15 @@ Atlas components communicate exclusively through well-defined contracts (Events,
 
 This ensures the Repository Runtime remains modular and parser engines (e.g. tree-sitter) can be swapped out transparently.
 
-## 4. How to Propose an ADR
+### 4. Semantic Versioning
+
+All runtimes must be governed by versioning:
+- **API**: Semantic Versioning (`MAJOR.MINOR.PATCH`). Changes here dictate downstream breakage.
+- **Implementation**: Semantic Versioning (`MAJOR.MINOR.PATCH`). Evolves independently of the API.
+- **Schema**: Semantic Versioning (`MAJOR.MINOR.PATCH`). E.g., JSON schemas for API models.
+- **Events**: Explicit integer versions per event (`version: 1`, `version: 2`). E.g. `SnapshotCreated` can evolve to v2 while `RepositoryChanged` remains v1.
+
+## 5. How to Propose an ADR
 
 If you encounter an impossible implementation hurdle or a fatal architectural flaw:
 1. Do not "hack" a workaround in the code.
@@ -108,8 +116,13 @@ Before a runtime can officially be considered mature (L3) and acts as a foundati
 - [ ] **Symbol extraction succeeds:** AST maps to canonical `SymbolEntity`.
 - [ ] **Incremental synchronization works:** `notify` events map to `ChangeType` and trigger partial updates.
 - [ ] **Snapshot lineage works:** Snapshots correctly point to `parent_snapshot_id`.
-- [ ] **Event emission works:** Correct, versioned schemas emitted for lifecycle events.
-- [ ] **Benchmarks meet targets:** Open latency, parse latency, and memory metrics established.
+- [ ] **Event emission works:** Correct, individually versioned schemas emitted for lifecycle events.
+- [ ] **Benchmarks meet targets:** Performance meets objectives defined against the standard benchmark suite, not hard-coded limits.
+  - *Discovery*: Meets target budget for corpus.
+  - *Incremental Updates*: Provably faster than full reparse.
+  - *Memory*: Stable and bounded growth.
+- [ ] **Failure injection resilience:** Survives watcher restarts, deleted files, unparseable inputs.
+- [ ] **API Stability:** API surface is frozen at v1.0.
 - [ ] **Conformance tests pass:** No architectural violations (e.g., Repository Runtime does not import Agent Runtime).
 
-Only after passing this review should implementation on downstream runtimes (like Context Runtime) begin.
+Only after passing this certification should implementation on downstream runtimes (like Context Runtime) begin.
