@@ -1,0 +1,5 @@
+atlas:
+  version: 1.0.0
+  architecture: frozen
+  ekb_version: 1.0
+  workspace_version: 1.0

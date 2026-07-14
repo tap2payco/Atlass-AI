@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/shared",
+    "packages/sdk",
+    "packages/runtime-repository"
+]

@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RepositoryProfileUpdated",
+  "version": 1,
+  "type": "object",
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "version": { "type": "integer", "default": 1 }
+  },
+  "required": ["id", "timestamp", "version"]
+}

@@ -1,0 +1,290 @@
+# Atlas Engineering Knowledge Base (EKB) — Implementation Plan
+
+> **This is NOT documentation. This is the project's constitution.**
+> Every implementation decision traces back to the EKB.
+> Every architectural change requires an EKB update.
+> The EKB is a living engineering reference, not a static document set.
+
+---
+
+## Goal
+
+Produce the **Atlas Engineering Knowledge Base** — a complete, production-grade, enterprise-quality engineering reference for a local-first, multi-agent AI Software Engineering Platform. The EKB will live in `c:\Users\psbon\CodeGuru\docs\` and serve as the authoritative foundation for the entire project lifecycle.
+
+No production code will be written. Every file is Markdown with Mermaid diagrams where they improve clarity.
+
+---
+
+## Locked Decisions
+
+| Dimension | Decision | Rationale |
+|---|---|---|
+| **Output location** | `c:\Users\psbon\CodeGuru\docs\` | User workspace |
+| **Format** | Markdown (`.md`) with Mermaid | Version-controllable, portable |
+| **AI Models (fixed)** | Qwen3-Coder, DeepSeek R1, BAAI BGE-M3 | User constraint |
+| **Core orchestration** | Rust | Performance, safety, concurrency |
+| **AI runtime & agents** | Python | LLM ecosystem compatibility |
+| **Desktop shell** | Tauri | Lightweight, cross-platform, Rust-native |
+| **Frontend** | React + TypeScript | Ecosystem, type safety |
+| **Primary database** | PostgreSQL (prod) / SQLite (local) | Reliability + lightweight option |
+| **Vector database** | Qdrant | Local-first, performant, Rust-native |
+| **Repository parsing** | Tree-sitter | Industry standard, multi-language |
+| **Messaging** | NATS (abstractable) | Start in-process, scale to distributed |
+| **Inference** | Ollama (dev), adapters for llama.cpp/vLLM | Flexibility |
+| **Containerization** | Docker | Standard |
+| **Observability** | OpenTelemetry | Vendor-neutral standard |
+
+---
+
+## Complete EKB Structure
+
+```
+docs/
+├── 00-index.md                                    # Master index + traceability matrix
+│
+├── 01-vision/
+│   └── vision.md                                  # Mission, goals, non-goals, success criteria, roadmap
+│
+├── 02-prd/
+│   └── prd.md                                     # Requirements, user stories, acceptance criteria, risks
+│
+├── 03-architecture/
+│   ├── system-architecture.md                     # Overall system, layers, boundaries, data flow
+│   ├── agent-architecture.md                      # All 15+ agents with FORMAL CONTRACTS
+│   ├── agent-lifecycle.md                         # Born → Initialized → Waiting → Executing → Archived
+│   ├── orchestrator-design.md                     # Collaboration, scheduling, conflict resolution
+│   ├── execution-engine.md                        # Task queue, priority, retries, rollback, state machine
+│   ├── communication-protocol.md                  # Agent message format, pub/sub, correlation IDs
+│   ├── memory-system.md                           # Working/long-term/repo/decision/architecture memory
+│   ├── rag-architecture.md                        # Indexing, chunking, embeddings, re-ranking
+│   ├── ai-pipeline.md                             # Prompt → Reasoning → Execution → Review pipelines
+│   └── workspace-model.md                         # Workspace, projects, sessions, repos, artifacts
+│
+├── 04-subsystems/
+│   ├── tooling-architecture.md                    # Terminal, Git, FS, Docker, plugins, sandboxing
+│   ├── backend-architecture.md                    # API, auth, DI, events, persistence
+│   ├── frontend-architecture.md                   # Desktop, web, state, design system
+│   ├── database-architecture.md                   # Schema, storage, migrations, backup
+│   ├── security-architecture.md                   # Threat model, sandboxing, permissions, audit
+│   └── repository-intelligence.md                 # AST, dependency graph, symbol graph, call graph
+│
+├── 05-engineering/
+│   ├── repository-architecture.md                 # Monorepo structure, conventions
+│   ├── testing-strategy.md                        # Unit, integration, E2E, agent simulation
+│   ├── deployment-architecture.md                 # Local, Docker, GPU/CPU, updates
+│   ├── observability.md                           # Metrics, tracing, logging, dashboards
+│   ├── coding-standards.md                        # Naming, review, commit, branching
+│   └── development-playbook.md                    # Contributor handbook: setup → code → test → merge
+│
+├── 06-specifications/
+│   ├── api-documentation.md                       # Every service, endpoint, event, error
+│   ├── data-models.md                             # Every entity, DTO, schema, event
+│   └── uml-diagrams.md                            # All Mermaid diagrams consolidated
+│
+├── 07-roadmap/
+│   ├── implementation-roadmap.md                  # Phased plan with exit criteria
+│   ├── future-expansion.md                        # Extension points, marketplace, cloud
+│   └── architecture-evolution.md                  # v1 → v2 → distributed → cloud → enterprise
+│
+├── 08-governance/
+│   ├── engineering-principles.md                  # Core principles that govern all decisions
+│   ├── decision-framework.md                      # When to split agents, add models, change tech
+│   ├── architecture-principles.md                 # Architectural constraints and invariants
+│   ├── risk-register.md                           # All identified risks with mitigations
+│   ├── technology-selection-framework.md          # How tech choices are evaluated + comparisons
+│   ├── definition-of-done.md                      # What qualifies as "production ready"
+│   └── quality-gates.md                           # Gates for PRs, releases, architecture changes
+│
+├── 09-ai/
+│   ├── reasoning-framework.md                     # How agents think: analyze → plan → execute → reflect
+│   ├── planning-framework.md                      # Task decomposition, estimation, validation
+│   ├── prompt-engineering.md                      # Prompt templates, construction, optimization
+│   ├── tool-calling.md                            # Tool selection, invocation, result handling
+│   ├── agent-coordination.md                      # Multi-agent collaboration patterns
+│   ├── reflection.md                              # Self-evaluation, learning, improvement loops
+│   ├── evaluation.md                              # Benchmarks, scorecards, quality metrics
+│   ├── memory-updates.md                          # When/how memory is written, validated, pruned
+│   └── project-intelligence.md                    # Learning coding styles, patterns, habits, fixes
+│
+├── 10-plugin-sdk/
+│   ├── plugin-sdk.md                              # SDK overview, manifest, registration, lifecycle
+│   ├── plugin-security.md                         # Permissions, sandbox, validation
+│   └── plugin-marketplace.md                      # Versioning, distribution, discovery
+│
+├── appendix/
+│   └── adr/
+│       ├── 000-template.md                        # ADR template
+│       ├── 001-multi-agent-architecture.md
+│       ├── 002-why-three-models.md
+│       ├── 003-why-qwen3-coder.md
+│       ├── 004-why-deepseek-r1.md
+│       ├── 005-why-bge-m3.md
+│       ├── 006-local-first-design.md
+│       ├── 007-why-rust-core.md
+│       ├── 008-why-python-ai-runtime.md
+│       ├── 009-why-tauri.md
+│       ├── 010-why-event-driven.md
+│       ├── 011-why-nats.md
+│       ├── 012-why-qdrant.md
+│       ├── 013-why-postgresql-sqlite.md
+│       ├── 014-why-tree-sitter.md
+│       └── 015-why-ollama.md
+```
+
+**Total: 48 documents** (24 core + 9 AI specs + 7 governance + 3 plugin + 15 ADRs + template)
+
+---
+
+## Revised Production Phases
+
+### Phase 1 — Constitution (Foundation + Governance + Early ADRs)
+
+> Establishes the project's identity, constraints, and decision-making framework.
+
+| # | Document | Purpose |
+|---|---|---|
+| 1 | `00-index.md` | Master index with traceability matrix |
+| 2 | `01-vision/vision.md` | Mission, goals, non-goals, competitive analysis |
+| 3 | `02-prd/prd.md` | Requirements, user stories, acceptance criteria |
+| 4 | `08-governance/engineering-principles.md` | Core principles governing all decisions |
+| 5 | `08-governance/architecture-principles.md` | Architectural constraints and invariants |
+| 6 | `08-governance/decision-framework.md` | When/how to make architectural decisions |
+| 7 | `08-governance/technology-selection-framework.md` | Tech evaluation criteria + all comparisons |
+| 8 | `08-governance/definition-of-done.md` | What "production ready" means |
+| 9 | `08-governance/quality-gates.md` | Gates for PRs, releases, arch changes |
+| 10 | `08-governance/risk-register.md` | All risks with mitigations |
+| 11 | `appendix/adr/000-template.md` | ADR template |
+| 12–26 | `appendix/adr/001–015` | All 15 foundational ADRs |
+
+**Exit Criteria**: A new contributor can read Phase 1 and understand *why* every major decision was made.
+
+---
+
+### Phase 2 — Core Architecture (System + Agents + Orchestrator + Execution)
+
+> Defines the structural backbone of the platform.
+
+| # | Document | Purpose |
+|---|---|---|
+| 27 | `03-architecture/system-architecture.md` | Layers, boundaries, component diagram |
+| 28 | `03-architecture/agent-architecture.md` | All 15+ agents with formal contracts |
+| 29 | `03-architecture/agent-lifecycle.md` | State machine: Created → Archived |
+| 30 | `03-architecture/orchestrator-design.md` | Scheduling, dependency, conflict resolution |
+| 31 | `03-architecture/execution-engine.md` | Queue, priority, retry, rollback, deadlock |
+| 32 | `03-architecture/communication-protocol.md` | Message format, pub/sub, correlation IDs |
+| 33 | `03-architecture/workspace-model.md` | Workspace, project, session, repo model |
+
+**Exit Criteria**: An engineer can implement the agent runtime without asking a single architectural question.
+
+---
+
+### Phase 3 — Intelligence Layer (Memory + RAG + AI Pipeline + AI Handbook)
+
+> Defines how the AI thinks, remembers, retrieves, and improves.
+
+| # | Document | Purpose |
+|---|---|---|
+| 34 | `03-architecture/memory-system.md` | All memory types, policies, retrieval |
+| 35 | `03-architecture/rag-architecture.md` | Indexing, chunking, embeddings, re-ranking |
+| 36 | `03-architecture/ai-pipeline.md` | Prompt → Reasoning → Execution → Review |
+| 37 | `04-subsystems/repository-intelligence.md` | AST, graphs, semantic analysis |
+| 38 | `09-ai/reasoning-framework.md` | How agents think |
+| 39 | `09-ai/planning-framework.md` | Task decomposition, estimation |
+| 40 | `09-ai/prompt-engineering.md` | Templates, construction, optimization |
+| 41 | `09-ai/tool-calling.md` | Tool selection, invocation, results |
+| 42 | `09-ai/agent-coordination.md` | Multi-agent collaboration patterns |
+| 43 | `09-ai/reflection.md` | Self-evaluation, learning loops |
+| 44 | `09-ai/evaluation.md` | Benchmarks, scorecards, metrics |
+| 45 | `09-ai/memory-updates.md` | Write/validate/prune policies |
+| 46 | `09-ai/project-intelligence.md` | Learning styles, patterns, habits |
+
+**Exit Criteria**: An AI engineer can implement the entire intelligence layer — prompt construction, memory management, retrieval pipeline, and evaluation — without ambiguity.
+
+---
+
+### Phase 4 — Subsystems (Backend, Frontend, DB, Security, Tooling)
+
+> Defines every supporting subsystem.
+
+| # | Document | Purpose |
+|---|---|---|
+| 47 | `04-subsystems/tooling-architecture.md` | Terminal, Git, FS, Docker, sandboxing |
+| 48 | `04-subsystems/backend-architecture.md` | API, auth, DI, events, persistence |
+| 49 | `04-subsystems/frontend-architecture.md` | Desktop, web, state, design system |
+| 50 | `04-subsystems/database-architecture.md` | Schema, migrations, backup |
+| 51 | `04-subsystems/security-architecture.md` | Threat model, permissions, audit |
+
+**Exit Criteria**: Backend, frontend, and infrastructure teams can work independently using only these documents.
+
+---
+
+### Phase 5 — Engineering Practices (Repo, Testing, Deployment, Observability, Standards, Playbook, Plugin SDK)
+
+> Defines how the team works.
+
+| # | Document | Purpose |
+|---|---|---|
+| 52 | `05-engineering/repository-architecture.md` | Monorepo structure, conventions |
+| 53 | `05-engineering/testing-strategy.md` | All test types, agent simulation |
+| 54 | `05-engineering/deployment-architecture.md` | Local, Docker, GPU/CPU, updates |
+| 55 | `05-engineering/observability.md` | Metrics, tracing, dashboards |
+| 56 | `05-engineering/coding-standards.md` | Naming, review, commit, branching |
+| 57 | `05-engineering/development-playbook.md` | Setup → Code → Test → Review → Merge |
+| 58 | `10-plugin-sdk/plugin-sdk.md` | SDK, manifest, registration, lifecycle |
+| 59 | `10-plugin-sdk/plugin-security.md` | Sandbox, permissions, validation |
+| 60 | `10-plugin-sdk/plugin-marketplace.md` | Versioning, distribution, discovery |
+
+**Exit Criteria**: A new contributor can go from `git clone` to merged PR using only the playbook and standards.
+
+---
+
+### Phase 6 — Specifications + Roadmap (API, Data Models, UML, Roadmap, Evolution)
+
+> Derived specifications and forward-looking planning.
+
+| # | Document | Purpose |
+|---|---|---|
+| 61 | `06-specifications/api-documentation.md` | Every service, endpoint, event, error |
+| 62 | `06-specifications/data-models.md` | Every entity, DTO, schema |
+| 63 | `06-specifications/uml-diagrams.md` | All Mermaid diagrams consolidated |
+| 64 | `07-roadmap/implementation-roadmap.md` | Phased implementation with exit criteria |
+| 65 | `07-roadmap/future-expansion.md` | Extension points, marketplace, cloud |
+| 66 | `07-roadmap/architecture-evolution.md` | v1 → distributed → enterprise → federated |
+
+**Exit Criteria**: The full EKB is complete. Any engineering team can build Atlas without the original architects.
+
+---
+
+## Quality Standards
+
+Every document in the EKB will:
+
+| Standard | How |
+|---|---|
+| **Explain WHY** | Every decision includes rationale, trade-offs, and alternatives considered |
+| **Formal contracts** | Agents use Consumes/Produces/SLA/KPI format, not prose descriptions |
+| **Technology comparisons** | Tables comparing alternatives with Pros/Cons/Decision columns |
+| **Mermaid diagrams** | System context, sequence, state machine, class, deployment, flow diagrams |
+| **Cross-references** | Relative links between documents; no document stands alone |
+| **Risk awareness** | Every section identifies risks with mitigation strategies |
+| **Enterprise quality** | Consistent heading structure, terminology, version headers |
+| **ADR traceability** | Major decisions reference their ADR; ADRs reference the documents they affect |
+
+---
+
+## Verification Plan
+
+### Document Quality
+- Internal consistency across all 48 documents
+- All Mermaid diagrams use valid syntax
+- All cross-reference links are valid
+- Every agent has a formal contract (not prose)
+- Every technology choice has a comparison table
+
+### Completeness
+- Traceability matrix in `00-index.md` maps every original requirement to its document
+- All 23 original areas covered + all 15 upgrades
+
+### Phase Gates
+- User review and approval at each phase boundary
+- No phase begins until the previous phase is approved

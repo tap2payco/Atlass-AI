@@ -1,0 +1,161 @@
+version: "1.0"
+apps:
+  - name: desktop
+    language: typescript/rust
+    owner: Frontend Team
+    dependencies:
+      - shared
+      - sdk
+    public_api: [IPC Commands]
+    internal_api: [React Components]
+    status: Planned
+
+  - name: cli
+    language: rust
+    owner: Core Team
+    dependencies:
+      - shared
+      - orchestrator
+    public_api: [CLI Args]
+    internal_api: [Command Handlers]
+    status: Planned
+
+  - name: server
+    language: rust
+    owner: Core Team
+    dependencies:
+      - shared
+      - orchestrator
+    public_api: [REST, Websockets]
+    internal_api: [HTTP Handlers]
+    status: Planned
+
+packages:
+  - name: orchestrator
+    language: rust
+    owner: Control Plane
+    dependencies:
+      - runtime-execution
+      - shared
+    public_api: [submit_task]
+    internal_api: [Event loops]
+    status: Planned
+
+  - name: runtime-execution
+    language: rust
+    owner: Control Plane
+    dependencies:
+      - runtime-agent
+      - shared
+    public_api: [schedule_task]
+    internal_api: [Queues, workers]
+    status: Planned
+
+  - name: runtime-policy
+    language: rust
+    owner: Control Plane
+    dependencies:
+      - shared
+    public_api: [validate_action]
+    internal_api: [Rule engines]
+    status: Planned
+
+  - name: runtime-workflow
+    language: rust
+    owner: Control Plane
+    dependencies:
+      - runtime-execution
+    public_api: [start_workflow]
+    internal_api: [State checkpointing]
+    status: Planned
+
+  - name: runtime-agent
+    language: python
+    owner: Data Plane
+    dependencies:
+      - runtime-prompt
+      - runtime-context
+    public_api: [invoke_agent]
+    internal_api: [Pipeline stages]
+    status: Planned
+
+  - name: runtime-context
+    language: python
+    owner: Data Plane
+    dependencies:
+      - runtime-memory
+      - runtime-repository
+    public_api: [resolve_context]
+    internal_api: [Chunking, pruning]
+    status: Planned
+
+  - name: runtime-memory
+    language: python
+    owner: Data Plane
+    dependencies:
+      - shared
+    public_api: [store_memory, query]
+    internal_api: [DB connections]
+    status: Planned
+
+  - name: runtime-repository
+    language: rust
+    owner: Data Plane
+    dependencies:
+      - shared
+    public_api: [get_symbol_graph]
+    internal_api: [Tree-sitter parsers]
+    status: Planned
+
+  - name: runtime-prompt
+    language: python
+    owner: Data Plane
+    dependencies:
+      - runtime-model
+    public_api: [generate_prompt]
+    internal_api: [Jinja/formatters]
+    status: Planned
+
+  - name: runtime-model
+    language: python
+    owner: Data Plane
+    dependencies:
+      - shared
+    public_api: [execute_inference]
+    internal_api: [API clients]
+    status: Planned
+
+  - name: runtime-tool
+    language: rust
+    owner: Data Plane
+    dependencies:
+      - shared
+    public_api: [execute_tool]
+    internal_api: [Subprocess, Docker]
+    status: Planned
+
+  - name: runtime-plugin
+    language: rust
+    owner: Data Plane
+    dependencies:
+      - sdk
+    public_api: [invoke_plugin]
+    internal_api: [WASM Sandbox]
+    status: Planned
+
+  - name: shared
+    language: rust
+    owner: Framework
+    dependencies: []
+    public_api: [Structs, traits, enums]
+    internal_api: []
+    status: Planned
+
+  - name: sdk
+    language: rust
+    owner: Framework
+    dependencies:
+      - shared
+    public_api: [Traits for plugins]
+    internal_api: []
+    status: Planned
