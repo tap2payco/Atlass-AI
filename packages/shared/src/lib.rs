@@ -4,3 +4,4 @@ pub mod events;
 pub mod config;
 pub mod types;
 pub mod entities;
+pub mod context;
