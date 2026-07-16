@@ -1,37 +1,70 @@
-pub mod pipelines;
+pub mod policy;
+pub mod retrieval;
+pub mod scoring;
+pub mod assembly;
+pub mod optimization;
+pub mod validation;
+pub mod cache;
+pub mod providers;
 
 use sdk::context::{ContextRuntime, ContextRequest};
-use shared::context::ContextPackage;
+use sdk::context::policy::ContextPolicy;
+use shared::context::{ContextPackage, ContextBudget};
 use shared::types::Result;
-use sdk::repository::RepositoryRuntime;
 use async_trait::async_trait;
-use std::sync::Arc;
+
+use self::retrieval::planning::RetrievalPlanner;
+use self::retrieval::executor::PlanExecutor;
+use self::scoring::engine::ScoringEngine;
+use self::assembly::engine::AssemblyEngine;
+use self::optimization::strategy::ContextOptimization;
+use self::validation::layer::ValidationLayer;
 
 pub struct AtlasContextRuntime {
-    repository: Arc<dyn RepositoryRuntime>,
+    // A real implementation would hold a ProviderRegistry to inject into the scheduler
 }
 
 impl AtlasContextRuntime {
-    pub fn new(repository: Arc<dyn RepositoryRuntime>) -> Self {
-        Self { repository }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
 #[async_trait]
 impl ContextRuntime for AtlasContextRuntime {
-    async fn resolve_context(&self, request: ContextRequest) -> Result<ContextPackage> {
-        // Pipeline Stage 1: Retrieval
-        let candidates = pipelines::retrieval::ContextRetrieval::retrieve_candidates(&request, &*self.repository).await?;
+    async fn resolve_context(&self, request: ContextRequest, policy: Box<dyn ContextPolicy>) -> Result<ContextPackage> {
+        // 1. Policy Resolution & Retrieval Planning
+        let plan = RetrievalPlanner::build_plan(&request);
+
+        // 2. Plan Execution (Provider Scheduling)
+        let multi_fragments = PlanExecutor::execute(&plan, &request).await;
         
-        // Pipeline Stage 2: Ranking
-        let ranked = pipelines::ranking::ContextRanking::rank_candidates(candidates);
-        
-        // Pipeline Stage 3: Assembly
-        let assembled = pipelines::assembly::ContextAssembly::assemble_package(&request, ranked);
-        
-        // Pipeline Stage 4: Optimization
-        let optimized = pipelines::optimization::ContextOptimization::optimize_package(assembled);
-        
-        Ok(optimized)
+        // Flatten fragments
+        let mut fragments = Vec::new();
+        for mut f in multi_fragments {
+            fragments.append(&mut f.fragments);
+        }
+
+        // 3. Scoring Engine
+        ScoringEngine::score_fragments(&mut fragments, &policy.scoring_weights());
+
+        // 4. Assembly Engine
+        let mut budget = ContextBudget {
+            total_tokens_allocated: request.max_tokens.unwrap_or(8192),
+            tokens_used: 0,
+            truncated: false,
+        };
+        let mut package = AssemblyEngine::assemble(fragments, budget, request.request_id.clone());
+
+        // 5. Optimization Strategy
+        ContextOptimization::optimize(&mut package, policy.optimization_strategy().as_ref());
+
+        // 6. Validation
+        let diagnostics = ValidationLayer::validate(&package);
+        package.diagnostics = diagnostics;
+
+        // 7. Cache Lookup/Update could go here
+
+        Ok(package)
     }
 }

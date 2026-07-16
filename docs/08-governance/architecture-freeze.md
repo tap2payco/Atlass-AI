@@ -15,7 +15,7 @@ As of Phase 4 (Engineering Specification Suite), the architectural direction of 
 
 From this point forward, implementation (Phase 5+) must adhere to the following rules:
 
-1. **No Architectural Drift:** Engineering teams (both human and AI agents like Qwen3-Coder) must implement *against* the frozen EKB and the Engineering Specification Suite (ESS). 
+1. **No Architectural Drift:** Engineering teams (both human and AI agents like the Coding Assistant) must implement *against* the frozen EKB and the Engineering Specification Suite (ESS). 
 2. **ADR Requirement:** Any proposed architectural change, no matter how small, must be formalized via a new Architecture Decision Record (ADR) and approved by the Architecture Team. Ad-hoc architectural changes in Pull Requests are strictly prohibited.
 3. **Interface Stability:** Existing interfaces and machine-readable contracts may only be modified through versioned specification updates.
 4. **Mechanical Implementation:** If a specification is found to be ambiguous during implementation, development must pause, and the specification must be resolved first. Developers must not "fill in the blanks" with undocumented architectural logic.

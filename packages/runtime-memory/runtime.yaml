@@ -1,0 +1,22 @@
+name: "runtime-memory"
+runtime_id: "com.atlas.memory"
+version: "1.0.0"
+api_version: "v1"
+schema_version: "1.0"
+build_hash: "dev"
+minimum_kernel_version: "1.0.0"
+
+capabilities:
+  - "MemoryStorage"
+  - "MemoryRetrieval"
+  - "MemoryConsolidation"
+
+dependencies: []
+
+health_endpoint: "memory/health"
+metrics_prefix: "atlas_memory_"
+supported_events:
+  - "MemoryStored"
+  - "MemoryRetrieved"
+  - "MemoryForgotten"
+  - "MemoryConsolidated"

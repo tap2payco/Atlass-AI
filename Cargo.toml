@@ -4,5 +4,15 @@ members = [
     "packages/shared",
     "packages/sdk",
     "packages/runtime-repository",
-    "packages/runtime-context"
+    "packages/runtime-context",
+    "packages/observability",
+    "packages/execution-core",
+    "packages/runtime-kernel",
+    "packages/platform-contracts",
+    "packages/runtime-bus",
+    "packages/capability-registry",
+    "packages/platform-services",
+    "packages/runtime-memory",
+    "packages/runtime-knowledge",
+    "apps/atlas-conformance"
 ]

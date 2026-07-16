@@ -244,7 +244,7 @@ Each criterion is scored 1-5:
 - Simplest developer experience: `ollama pull model` → ready
 - Cross-platform GPU auto-detection eliminates setup friction
 - REST API makes integration trivial
-- Model library provides easy access to Qwen3-Coder, DeepSeek R1, and embedding models
+- Model library provides easy access to Coding Assistants, Reasoning Assistants, and Embedding Models
 - The largest local-inference community ensures rapid improvement
 
 **Why the adapter pattern:**

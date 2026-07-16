@@ -43,6 +43,19 @@ Before coding begins for any component, subsystem, or feature, the ERR must pass
 
 ---
 
+## AI Implementation Capabilities
+
+Atlas replaces hardcoded vendor-specific model assignments (e.g. Qwen3 or DeepSeek) with capability-based roles. Work must be delegated to the following capabilities:
+
+| Capability | Responsibility |
+|---|---|
+| **Documentation Assistant** | Produces architecture documents, ADRs, specifications, reviews, and implementation guides. |
+| **Coding Assistant** | Generates production code, interfaces, tests, refactoring, and implementation according to the frozen architecture. |
+| **Reasoning & Review Assistant** | Performs design reviews, debugging, optimization, root-cause analysis, validation, and planning. |
+| **Embedding & Retrieval Models** | Provide semantic search, indexing, vector retrieval, and repository intelligence. |
+
+---
+
 ## Process Workflow
 
 1. **Engineering Knowledge Base (EKB)** is updated.

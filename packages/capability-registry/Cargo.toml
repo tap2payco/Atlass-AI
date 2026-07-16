@@ -1,0 +1,9 @@
+[package]
+name = "capability-registry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+platform-contracts = { path = "../platform-contracts" }

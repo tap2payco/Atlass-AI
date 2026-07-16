@@ -16,11 +16,16 @@ This dashboard provides a real-time view of implementation progress for the Atla
 | Sprint 1.5 | Repository Runtime (AST/Graph) | 🟢 | 🟢 | 🟢 | 100% | L2 |
 | Sprint 1.75 | Repository Runtime (Indexing) | 🟢 | 🟢 | 🟢 | 100% | L3 |
 | Sprint 1.95 | Integration Validation | 🟢 | 🟢 | N/A | 100% | L3 |
-| Sprint 2 | Context Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 2 | Context Runtime (L2) | 🟡 | 🔴 | 🔴 | 0% | L1 |
+| Sprint 2.25 | Context Runtime (L3 Certification) | 🔴 | 🔴 | 🔴 | 0% | L1 |
+| Sprint 2.5 | Execution Core | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 2.6 | Runtime Kernel | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 2.7 | Platform Contracts | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 2.75 | Platform Conformance | 🔴 | 🔴 | 🔴 | 0% | L0 |
 | Sprint 3 | Memory Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
-| Sprint 4 | Prompt Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
-| Sprint 5 | Model Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
-| Sprint 6 | Tool Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 4 | Knowledge Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 5 | Planning Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
+| Sprint 6 | Decision Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
 | Sprint 7 | Execution Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
 | Sprint 8 | Workflow Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |
 | Sprint 9 | Agent Runtime | 🔴 | 🔴 | 🔴 | 0% | L0 |

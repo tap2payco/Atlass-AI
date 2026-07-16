@@ -51,17 +51,19 @@ quadrantChart
 | **Probability** | Medium (0.5) |
 | **Impact** | Critical (0.9) |
 | **Category** | AI Quality |
-| **Owner** | AI Team |
-| **Status** | 🟡 Mitigation in progress |
+| **Owner** | Core Engineering |
+| **Status** | Active |
 
-**Description:** Qwen3-Coder may not consistently produce production-quality code, especially for complex multi-file features, edge cases, or less common languages/frameworks.
+**Description:** The Coding Assistant may not consistently produce production-quality code, especially for complex multi-file features, edge cases, or less common languages/frameworks.
 
-**Root Cause:** Local models (even large ones) have lower capability ceilings than cloud models (GPT-4, Claude). Quantization further reduces quality.
+**Impact:** High - Bugs, regressions, architectural drift.
+
+**Root Cause:** Local models (even large ones) have lower capability ceilings than cloud models (GPT-4, Documentation Assistant equivalents). Quantization further reduces quality.
 
 **Mitigation:**
-1. **Evaluation framework** — Continuous benchmarking against known-good outputs (see [Evaluation](../09-ai/evaluation.md))
-2. **Multi-stage review** — DeepSeek R1 reviews all Qwen3-Coder output before delivery
-3. **Model adapter pattern** — Architecture supports swapping to better models as they become available
+1. **Unit Test Driven** — Code is verified against execution limits before merge
+2. **Multi-stage review** — The Reasoning & Review Assistant reviews all Coding Assistant output before delivery
+3. **Small contexts** — Retrieval engine bounds the context to <4000 tokens to keep focus highas they become available
 4. **Prompt optimization** — Dedicated prompt engineering effort per agent role
 5. **Human-in-the-loop** — User approval before any code is committed
 
@@ -78,21 +80,21 @@ quadrantChart
 | **Probability** | High (0.8) |
 | **Impact** | High (0.8) |
 | **Category** | Resource |
-| **Owner** | Platform Team |
-| **Status** | 🟡 Mitigation in progress |
+| **Owner** | Infrastructure |
+| **Status** | Mitigated |
 
-**Description:** Running Qwen3-Coder + DeepSeek R1 + BGE-M3 simultaneously may exceed available GPU memory on consumer hardware (8-16 GB VRAM).
+**Description:** Running the Coding Assistant + Reasoning & Review Assistant + Embedding & Retrieval Models simultaneously may exceed available GPU memory on consumer hardware (8-16 GB VRAM).
+
+**Impact:** Fatal - System crashes or OOMs during execution.
 
 **Root Cause:** Large language models require significant VRAM. Three models simultaneously could require 24+ GB VRAM unquantized.
 
 **Mitigation:**
-1. **Model swapping** — Only load the active model; unload idle models (orchestrator manages)
-2. **Quantization tiers** — Support GGUF Q4/Q5/Q8 for different hardware capabilities
-3. **BGE-M3 on CPU** — Embedding model is small enough to run efficiently on CPU
-4. **Hardware profiles** — Detect available resources and auto-configure (e.g., "8GB mode," "16GB mode," "24GB+ mode")
-5. **Offloading** — Partial GPU/CPU split for large models
+1. **Strict memory caps** — Execution Core forces unloading of models before swapping
+2. **Quantization** — Models run in 4-bit or 8-bit quantized modes (GGUF via Ollama)
+3. **Embedding Model on CPU** — Embedding model is small enough to run efficiently on CPU
 
-**Contingency:** Single-model mode with DeepSeek R1 handling both reasoning and simple code generation. Quality degrades but system remains functional.
+**Contingency:** Single-model mode with the Reasoning & Review Assistant handling both reasoning and simple code generation. Quality degrades but system remains functional.
 
 **Review Date:** Monthly
 

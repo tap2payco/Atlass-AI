@@ -1,0 +1,12 @@
+name: "runtime-context"
+version: "0.1.0"
+api_version: "v1.0.0"
+capabilities:
+  - "ContextAssembly"
+  - "ContextPlanning"
+dependencies:
+  - "RepositoryEntities"
+  - "Symbols"
+health_endpoint: "/health/context"
+metrics_prefix: "atlas_context_"
+supported_events: []
