@@ -46,6 +46,13 @@ pub enum ConflictPolicy {
     ManualResolution,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsolidationPolicy {
+    Standard,
+    Aggressive,
+    Deferred,
+}
+
 pub struct PolicyEngine {
     // Stub
 }

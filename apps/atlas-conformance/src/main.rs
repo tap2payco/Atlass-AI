@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
+mod memory_check;
+
 #[derive(Parser)]
 #[command(name = "atlas-conformance")]
 #[command(about = "Platform Conformance Validation Tool for Atlas")]

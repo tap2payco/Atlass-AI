@@ -30,7 +30,7 @@ impl ContextProvider for RepositoryProvider {
         // As a thin adapter, we translate the ContextRequest into specific SDK calls
         // For demonstration, we just fetch a snapshot and wrap it in a fragment.
         
-        let dummy_repo_id = shared::id::RepositoryId::new("local");
+        let dummy_repo_id = shared::id::RepositoryId::new();
         let snapshot = self.runtime.get_snapshot(dummy_repo_id).await?;
 
         let fragment = ContextFragment {

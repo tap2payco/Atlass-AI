@@ -1,32 +1,32 @@
-use crate::domain::MemoryRecord;
+use crate::domain::{MemoryMetadata, MemoryRecord};
 
-pub trait Scorer {
-    fn score<T>(&self, record: &MemoryRecord<T>, current_score: f32) -> f32;
+pub trait Scorer: Send + Sync {
+    fn score(&self, metadata: &MemoryMetadata, current_score: f32) -> f32;
 }
 
 pub struct ImportanceScore;
 impl Scorer for ImportanceScore {
-    fn score<T>(&self, record: &MemoryRecord<T>, current_score: f32) -> f32 {
-        current_score * record.metadata.importance
+    fn score(&self, metadata: &MemoryMetadata, current_score: f32) -> f32 {
+        current_score * metadata.importance
     }
 }
 
 pub struct ConfidenceScore;
 impl Scorer for ConfidenceScore {
-    fn score<T>(&self, record: &MemoryRecord<T>, current_score: f32) -> f32 {
-        current_score * record.metadata.confidence
+    fn score(&self, metadata: &MemoryMetadata, current_score: f32) -> f32 {
+        current_score * metadata.confidence
     }
 }
 
 pub struct QualityScore;
 impl Scorer for QualityScore {
-    fn score<T>(&self, record: &MemoryRecord<T>, current_score: f32) -> f32 {
-        current_score * record.metadata.quality
+    fn score(&self, metadata: &MemoryMetadata, current_score: f32) -> f32 {
+        current_score * metadata.quality
     }
 }
 
 pub struct RankingEngine {
-    scorers: Vec<Box<dyn Scorer + Send + Sync>>,
+    scorers: Vec<Box<dyn Scorer>>,
 }
 
 impl RankingEngine {
@@ -46,8 +46,8 @@ impl RankingEngine {
             let mut score_b = 1.0;
             
             for scorer in &self.scorers {
-                score_a = scorer.score(a, score_a);
-                score_b = scorer.score(b, score_b);
+                score_a = scorer.score(&a.metadata, score_a);
+                score_b = scorer.score(&b.metadata, score_b);
             }
             
             score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
@@ -55,3 +55,4 @@ impl RankingEngine {
         candidates
     }
 }
+

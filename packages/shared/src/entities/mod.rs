@@ -10,6 +10,6 @@ pub use workspace::WorkspaceEntity;
 pub use repository::RepositoryEntity;
 pub use package::PackageEntity;
 pub use module::ModuleEntity;
-pub use symbol::SymbolEntity;
+pub use symbol::{SymbolEntity, SymbolType};
 pub use relationship::RelationshipEntity;
 pub use collection::EntityCollection;

@@ -1,4 +1,4 @@
-use crate::pipeline::{KnowledgeStage, PipelineContext};
+use crate::pipeline::{KnowledgeStage, KnowledgeCompilationContext};
 use crate::domain::{KnowledgeInference, CURRENT_ONTOLOGY_VERSION};
 
 pub struct InferenceEngine {
@@ -16,7 +16,7 @@ impl InferenceEngine {
 }
 
 impl KnowledgeStage for InferenceEngine {
-    fn execute<T>(&self, ctx: &mut PipelineContext<T>) -> Result<(), String> {
+    fn execute<T>(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
         // Demonstration of Confidence Math
         if ctx.facts.len() >= 2 {
             let conf_a = ctx.facts[0].confidence;

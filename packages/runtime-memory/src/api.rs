@@ -38,7 +38,7 @@ impl MemoryRuntime {
     }
     
     pub async fn snapshot<T: Send + Sync>(&self, _id: &str) -> Result<MemorySnapshot<T>, String> {
-        Ok(MemorySnapshot::default())
+        Err("Snapshot not implemented".to_string())
     }
     
     pub async fn query<T: Send + Sync>(&self, _params: &str) -> Result<Vec<MemoryRecord<T>>, String> {

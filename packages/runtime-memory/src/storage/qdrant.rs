@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::storage::adapter::{StorageAdapter, StorageCapability};
+use crate::storage::adapter::StorageAdapter;
 use crate::domain::MemoryRecord;
 
 pub struct QdrantAdapter {

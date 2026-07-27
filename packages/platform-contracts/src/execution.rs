@@ -31,9 +31,12 @@ pub struct ValidationReport<D> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionStep {
     pub step_id: String,
+    pub name: String,
     pub provider: String,
     pub is_parallel: bool,
     pub timeout_ms: Option<u64>,
+    pub required_capabilities: Vec<String>,
+    pub priority: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

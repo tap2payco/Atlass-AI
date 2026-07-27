@@ -11,3 +11,5 @@ thiserror = "1.0"
 shared = { path = "../shared" }
 sdk = { path = "../sdk" }
 execution-core = { path = "../execution-core" }
+platform-contracts = { path = "../platform-contracts" }
+uuid = { version = "1.10", features = ["v4"] }
