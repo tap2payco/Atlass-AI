@@ -19,10 +19,3 @@ pub struct RepositorySnapshot {
     pub updated_entities: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityCollection {
-    pub packages: Vec<PackageEntity>,
-    pub modules: Vec<ModuleEntity>,
-    pub symbols: Vec<SymbolEntity>,
-    pub relationships: Vec<RelationshipEntity>,
-}

@@ -69,14 +69,13 @@ pub mod routing;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use platform_contracts::health::HealthState;
 use tokio::sync::mpsc;
 
 use shared::error::InferenceError;
 
 use crate::cache::InferenceCache;
-use crate::config::ModelRuntimeConfig;
+pub use crate::config::ModelRuntimeConfig;
 use crate::domain::{ExecutionMetadata, ModelRequest, ModelResponse};
 use crate::events::ModelEvent;
 use crate::local_model_registry::LocalModelRegistry;
@@ -88,6 +87,7 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::routing::Router;
+
 
 // ── ModelRuntime ──────────────────────────────────────────────────────────────
 
