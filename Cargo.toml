@@ -14,5 +14,6 @@ members = [
     "packages/platform-services",
     "packages/runtime-memory",
     "packages/runtime-knowledge",
+    "packages/runtime-model",
     "apps/atlas-conformance"
 ]

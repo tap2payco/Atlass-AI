@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-shared = { path = "../shared" }
-async-trait = "0.1"
+shared             = { path = "../shared" }
+platform-contracts = { path = "../platform-contracts" }
+async-trait        = "0.1"
+tokio              = { version = "1", features = ["sync"] }
+serde              = { version = "1.0", features = ["derive"] }

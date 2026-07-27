@@ -117,7 +117,7 @@ packages:
     status: Planned
 
   - name: runtime-model
-    language: python
+    language: rust
     owner: Data Plane
     dependencies:
       - shared

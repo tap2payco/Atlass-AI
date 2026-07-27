@@ -1,0 +1,33 @@
+[package]
+name = "runtime-model"
+version = "0.1.0"
+edition = "2021"
+description = "Atlas Model Runtime — capability-based inference routing with local-first providers and external fallback"
+
+[dependencies]
+# Workspace crates
+shared              = { path = "../shared" }
+sdk                 = { path = "../sdk" }
+platform-contracts  = { path = "../platform-contracts" }
+capability-registry = { path = "../capability-registry" }
+observability       = { path = "../observability" }
+
+# Async runtime
+async-trait = "0.1"
+tokio       = { version = "1", features = ["full"] }
+
+# Serialisation
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP clients (for Ollama + Fireworks)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Hashing (prompt cache keys)
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

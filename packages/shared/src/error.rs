@@ -20,6 +20,9 @@ pub enum AtlasError {
     #[error("Configuration error: {0}")]
     Configuration(#[from] ConfigurationError),
 
+    #[error("Inference error: {0}")]
+    Inference(#[from] InferenceError),
+
     #[error("Internal system error: {0}")]
     Internal(String),
 }
@@ -78,4 +81,31 @@ pub enum ConfigurationError {
     MissingKey(String),
     #[error("Invalid value for {key}: {reason}")]
     InvalidValue { key: String, reason: String },
+}
+
+#[derive(Error, Debug)]
+pub enum InferenceError {
+    #[error("Provider unavailable: {0}")]
+    ProviderUnavailable(String),
+
+    #[error("All providers failed for this request")]
+    AllProvidersFailed,
+
+    #[error("Inference timed out after {0} ms")]
+    Timeout(u64),
+
+    #[error("Token limit exceeded: limit={limit}, requested={requested}")]
+    TokenLimitExceeded { limit: u32, requested: u32 },
+
+    #[error("Circuit breaker open for provider: {0}")]
+    CircuitOpen(String),
+
+    #[error("API error from provider '{provider}': {message}")]
+    ApiError { provider: String, message: String },
+
+    #[error("Capability not supported by provider: {0}")]
+    Unsupported(String),
+
+    #[error("Streaming error: {0}")]
+    StreamError(String),
 }

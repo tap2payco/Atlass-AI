@@ -5,3 +5,4 @@ pub mod repository;
 pub mod tool;
 pub mod workflow;
 pub mod context;
+pub mod model;
