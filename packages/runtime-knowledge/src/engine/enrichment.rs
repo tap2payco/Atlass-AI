@@ -26,8 +26,8 @@ impl EnrichmentEngine {
     }
 }
 
-impl KnowledgeStage for EnrichmentEngine {
-    fn execute<T>(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
+impl<T> KnowledgeStage<T> for EnrichmentEngine {
+    fn execute(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
         for entity in &mut ctx.canonical_entities {
             for rule in &self.rules {
                 if entity.entity_type == rule.condition_type {

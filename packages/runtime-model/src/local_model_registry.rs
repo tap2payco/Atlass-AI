@@ -132,12 +132,14 @@ fn infer_capabilities(name: &str) -> Vec<ModelCapability> {
     }
 
     if lower.contains("qwen2.5-coder") || lower.contains("qwen2_5_coder") {
+        caps.push(ModelCapability::Reasoning);
         caps.push(ModelCapability::CodeGeneration);
         caps.push(ModelCapability::CodeAnalysis);
         caps.push(ModelCapability::Extraction);
     }
 
     if lower.contains("qwen") && !lower.contains("coder") {
+        caps.push(ModelCapability::Reasoning);
         caps.push(ModelCapability::Summarization);
         caps.push(ModelCapability::Extraction);
     }
@@ -178,10 +180,10 @@ mod tests {
     #[test]
     fn infer_qwen_coder_capabilities() {
         let caps = infer_capabilities("qwen2.5-coder:7b");
+        assert!(caps.contains(&ModelCapability::Reasoning));
         assert!(caps.contains(&ModelCapability::CodeGeneration));
         assert!(caps.contains(&ModelCapability::CodeAnalysis));
         assert!(caps.contains(&ModelCapability::Extraction));
-        assert!(!caps.contains(&ModelCapability::Reasoning));
     }
 
     #[test]

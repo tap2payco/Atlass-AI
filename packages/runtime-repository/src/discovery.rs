@@ -65,8 +65,29 @@ impl RepositoryDiscovery {
         Ok(files)
     }
 
-    fn detect_language(&self, _files: &[PathBuf]) -> Option<String> {
-        // Placeholder for language detection logic (e.g. counting extensions)
-        Some("rust".to_string())
+    fn detect_language(&self, files: &[PathBuf]) -> Option<String> {
+        use std::collections::HashMap;
+
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+
+        for file in files {
+            if let Some(ext) = file.extension().and_then(|e| e.to_str()) {
+                let lang = match ext.to_lowercase().as_str() {
+                    "rs" => "rust",
+                    "py" => "python",
+                    "go" => "go",
+                    "ts" | "tsx" => "typescript",
+                    "js" | "jsx" => "javascript",
+                    "c" | "cpp" | "h" | "hpp" => "c_cpp",
+                    "java" => "java",
+                    "rb" => "ruby",
+                    "kt" => "kotlin",
+                    _ => continue,
+                };
+                *counts.entry(lang).or_insert(0) += 1;
+            }
+        }
+
+        counts.into_iter().max_by_key(|&(_, count)| count).map(|(lang, _)| lang.to_string())
     }
 }

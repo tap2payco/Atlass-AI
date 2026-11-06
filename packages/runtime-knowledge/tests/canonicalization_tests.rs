@@ -1,5 +1,5 @@
 use runtime_knowledge::engine::canonicalization::CanonicalizationEngine;
-use runtime_knowledge::domain::{RawEntity, EntityTypeId};
+use runtime_knowledge::domain::RawEntity;
 use runtime_knowledge::pipeline::{KnowledgeStage, KnowledgeCompilationContext};
 use runtime_knowledge::ontology::{OntologyRegistry, Vocabulary, OntologyVersion, TypeSchema, Taxonomy};
 use runtime_memory::engine::snapshot::MemorySnapshot;
@@ -32,7 +32,7 @@ struct MockData;
 #[test]
 fn test_determinism() {
     let ontology = mock_ontology(1);
-    let mem = MemorySnapshot::default();
+    let mem: MemorySnapshot<MockData> = MemorySnapshot::default();
     
     let engine = CanonicalizationEngine::new("atlas.application".to_string());
     
@@ -52,7 +52,7 @@ fn test_determinism() {
 
 #[test]
 fn test_vocabulary_version() {
-    let mem = MemorySnapshot::default();
+    let mem: MemorySnapshot<MockData> = MemorySnapshot::default();
     let engine = CanonicalizationEngine::new("atlas.application".to_string());
     
     // V1 does not know "git repository"
@@ -74,7 +74,7 @@ fn test_vocabulary_version() {
 #[test]
 fn test_collision_avoidance() {
     let ontology = mock_ontology(1);
-    let mem = MemorySnapshot::default();
+    let mem: MemorySnapshot<MockData> = MemorySnapshot::default();
     
     let app_engine = CanonicalizationEngine::new("atlas.application".to_string());
     let mut ctx_app = KnowledgeCompilationContext::new(&ontology, &mem);

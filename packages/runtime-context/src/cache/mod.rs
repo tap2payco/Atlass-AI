@@ -1,3 +1,3 @@
 pub mod store;
 
-// Logic for context caching
+pub use store::ContextCache;

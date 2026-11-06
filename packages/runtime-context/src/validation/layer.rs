@@ -3,7 +3,7 @@ use shared::context::{ContextPackage, ValidationDiagnostic, ValidationDiagnostic
 pub struct ValidationLayer;
 
 impl ValidationLayer {
-    pub fn validate(package: &ContextPackage) -> Vec<ValidationDiagnostic> {
+    pub fn validate(package: &ContextPackage, required_entities: &[String]) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
 
         // 1. Budget check
@@ -15,6 +15,31 @@ impl ValidationLayer {
                 fragment_id: None,
             });
         }
+        
+        // Check truncation warning
+        if package.budget.truncated {
+            diagnostics.push(ValidationDiagnostic {
+                level: ValidationDiagnosticLevel::Warning,
+                code: "CONTEXT_TRUNCATED".to_string(),
+                message: "Context package was truncated to fit the token budget. Some fragments were dropped.".to_string(),
+                fragment_id: None,
+            });
+        }
+
+        // 1.5 Verify required entities are present
+        for required in required_entities {
+            let found = package.fragments.iter().any(|f| f.entity_ref == *required);
+            if !found {
+                diagnostics.push(ValidationDiagnostic {
+                    level: ValidationDiagnosticLevel::Warning,
+                    code: "MISSING_REQUIRED_ENTITY".to_string(),
+                    message: format!("Required entity '{}' was not found in the assembled package.", required),
+                    fragment_id: None,
+                });
+            }
+        }
+
+
 
         // 2. Fatal Errors for provenance and confidence
         for fragment in &package.fragments {

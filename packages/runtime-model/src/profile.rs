@@ -57,7 +57,11 @@ impl ModelProfile {
             Self {
                 capability: ModelCapability::Reasoning,
                 quality_tier: CapabilityProfile::Balanced,
-                preferred_models: vec!["deepseek-r1:7b".into()],
+                preferred_models: vec![
+                    "deepseek-r1:7b".into(),
+                    "qwen2.5:3b".into(),
+                    "qwen2.5-coder:3b".into()
+                ],
                 fallback_models: vec!["accounts/fireworks/models/deepseek-r1".into()],
                 temperature: 0.6,
                 max_context_tokens: 32_768,

@@ -9,3 +9,11 @@ pub enum RuntimeEvent {
     CapabilityRemoved { capability: String, provider: String },
     HealthChanged { runtime_id: String, previous: crate::health::HealthState, current: crate::health::HealthState },
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventSchemaDescriptor {
+    pub event_type: String,
+    pub version: u32,
+    pub emitter_runtime: String,
+    pub description: String,
+}

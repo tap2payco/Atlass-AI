@@ -2,19 +2,29 @@ use sdk::context::provider::ContextFragments;
 use platform_contracts::execution::ExecutionPlan;
 use sdk::context::ContextRequest;
 use shared::context::ContextFragment;
+use crate::providers::ProviderRegistry;
 
 pub struct ProviderScheduler;
 
 impl ProviderScheduler {
-    pub async fn execute_plan(plan: &ExecutionPlan, request: &ContextRequest) -> Vec<ContextFragments> {
+    pub async fn execute_plan(
+        plan: &ExecutionPlan,
+        request: &ContextRequest,
+        registry: Option<&ProviderRegistry>,
+    ) -> Vec<ContextFragments> {
         let mut results = Vec::new();
-        
-        // In a real implementation, this would look up active providers from the ProviderRegistry
-        // and spawn concurrent tasks based on the ExecutionStep.is_parallel flags.
-        // For now, we simulate executing the steps.
 
         for step in &plan.steps {
-            // Simulated retrieval per step
+            if let Some(reg) = registry {
+                if let Some(provider) = reg.get(&step.provider) {
+                    if let Ok(frags) = provider.retrieve(request).await {
+                        results.push(frags);
+                        continue;
+                    }
+                }
+            }
+
+            // Fallback simulation if provider not registered or call fails
             results.push(ContextFragments {
                 fragments: vec![
                     ContextFragment {
@@ -33,7 +43,7 @@ impl ProviderScheduler {
                 ]
             });
         }
-        
+
         results
     }
 }

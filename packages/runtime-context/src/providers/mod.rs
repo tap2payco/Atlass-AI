@@ -5,3 +5,6 @@ pub mod plugin;
 pub mod documentation;
 pub mod git;
 pub mod issue;
+pub mod registry;
+
+pub use registry::ProviderRegistry;

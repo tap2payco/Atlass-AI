@@ -15,8 +15,8 @@ impl InferenceEngine {
     }
 }
 
-impl KnowledgeStage for InferenceEngine {
-    fn execute<T>(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
+impl<T> KnowledgeStage<T> for InferenceEngine {
+    fn execute(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
         // Demonstration of Confidence Math
         if ctx.facts.len() >= 2 {
             let conf_a = ctx.facts[0].confidence;

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use crate::entities::EntityCollection;
-use crate::id::WorkspaceId;
 
 /// [v1.0.0 FROZEN]
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,8 +22,8 @@ impl CanonicalizationEngine {
     }
 }
 
-impl KnowledgeStage for CanonicalizationEngine {
-    fn execute<T>(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
+impl<T> KnowledgeStage<T> for CanonicalizationEngine {
+    fn execute(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
         let mut canonical_map: HashMap<String, Vec<RawEntity>> = HashMap::new();
         
         // 1. Resolve aliases exactly against Vocabulary

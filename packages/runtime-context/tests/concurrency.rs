@@ -19,7 +19,7 @@ async fn test_provider_scheduler_concurrency() {
     let start = Instant::now();
     
     // PlanExecutor -> ProviderScheduler will eventually run this concurrently
-    let fragments = PlanExecutor::execute(&plan, &request).await;
+    let fragments = PlanExecutor::execute(&plan, &request, None).await;
 
     let elapsed = start.elapsed();
     

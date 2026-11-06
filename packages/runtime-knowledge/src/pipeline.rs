@@ -43,20 +43,20 @@ impl<'a, T> KnowledgeCompilationContext<'a, T> {
     }
 }
 
-pub trait KnowledgeStage {
-    fn execute<T>(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String>;
+pub trait KnowledgeStage<T> {
+    fn execute(&self, ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String>;
 }
 
-pub struct KnowledgePipeline {
-    stages: Vec<Box<dyn KnowledgeStage + Send + Sync>>,
+pub struct KnowledgePipeline<T> {
+    stages: Vec<Box<dyn KnowledgeStage<T> + Send + Sync>>,
 }
 
-impl KnowledgePipeline {
-    pub fn new(stages: Vec<Box<dyn KnowledgeStage + Send + Sync>>) -> Self {
+impl<T> KnowledgePipeline<T> {
+    pub fn new(stages: Vec<Box<dyn KnowledgeStage<T> + Send + Sync>>) -> Self {
         Self { stages }
     }
     
-    pub fn execute<T>(&self, ontology: &OntologyRegistry, memory_snapshot: &MemorySnapshot<T>) -> Result<KnowledgeSnapshot, String> {
+    pub fn execute(&self, ontology: &OntologyRegistry, memory_snapshot: &MemorySnapshot<T>) -> Result<KnowledgeSnapshot, String> {
         let mut ctx = KnowledgeCompilationContext::new(ontology, memory_snapshot);
         
         for stage in &self.stages {

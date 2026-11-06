@@ -7,5 +7,11 @@ edition = "2021"
 shared             = { path = "../shared" }
 platform-contracts = { path = "../platform-contracts" }
 async-trait        = "0.1"
-tokio              = { version = "1", features = ["sync"] }
+tokio              = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
 serde              = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+runtime-repository = { path = "../runtime-repository" }
+runtime-context    = { path = "../runtime-context" }
+runtime-model      = { path = "../runtime-model" }
+runtime-memory     = { path = "../runtime-memory" }

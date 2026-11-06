@@ -8,8 +8,8 @@ impl OntologyValidationEngine {
     pub fn new() -> Self { Self {} }
 }
 
-impl KnowledgeStage for OntologyValidationEngine {
-    fn execute<T>(&self, _ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
+impl<T> KnowledgeStage<T> for OntologyValidationEngine {
+    fn execute(&self, _ctx: &mut KnowledgeCompilationContext<'_, T>) -> Result<(), String> {
         Ok(())
     }
 }

@@ -1,5 +1,13 @@
+pub use sdk::context::policy::OptimizationStrategy;
 use shared::context::ContextPackage;
-use sdk::context::policy::OptimizationStrategy;
+
+pub struct NoOpStrategy;
+
+impl OptimizationStrategy for NoOpStrategy {
+    fn name(&self) -> &str {
+        "NoOpStrategy"
+    }
+}
 
 pub struct ContextOptimization;
 
@@ -8,7 +16,7 @@ impl ContextOptimization {
         let max_tokens = package.budget.total_tokens_allocated;
         let mut current_tokens = 0;
         let mut kept_fragments = Vec::new();
-        let mut truncated = false;
+        let mut truncated = package.budget.truncated;
 
         // Since they are pre-sorted by scoring engine, we just take top N until budget is hit
         for fragment in package.fragments.drain(..) {

@@ -13,3 +13,6 @@ sdk = { path = "../sdk" }
 execution-core = { path = "../execution-core" }
 platform-contracts = { path = "../platform-contracts" }
 uuid = { version = "1.10", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }

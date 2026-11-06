@@ -8,6 +8,7 @@ use shared::types::Result;
 use self::policy::ContextPolicy;
 use self::intent::RetrievalIntent;
 
+#[derive(Debug, Clone)]
 pub struct ContextRequest {
     pub request_id: String,
     pub intent: RetrievalIntent,
