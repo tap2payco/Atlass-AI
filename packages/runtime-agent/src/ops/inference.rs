@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use sdk::model::ModelRuntime;
 use shared::model::{CapabilityProfile, ExecutionPolicy, ModelCapability, ModelRequest};
 
-use crate::conversation::{awaiting_model, model_view};
+use crate::conversation::{awaiting_model, fit_tool_outputs, model_view};
+use crate::ops::CompactionSettings;
 use crate::error::AgentError;
 use crate::operation::{Operation, OperationResult, StepContext, StopCause};
 
@@ -40,11 +41,19 @@ impl Default for InferenceSettings {
 pub struct InferenceOperation {
     model: Arc<dyn ModelRuntime>,
     settings: InferenceSettings,
+    /// When set, the request is fitted into this context window.
+    context: Option<CompactionSettings>,
 }
 
 impl InferenceOperation {
     pub fn new(model: Arc<dyn ModelRuntime>, settings: InferenceSettings) -> Self {
-        Self { model, settings }
+        Self { model, settings, context: None }
+    }
+
+    /// Shrink tool outputs in each request so it fits the window.
+    pub fn with_context(mut self, context: Option<CompactionSettings>) -> Self {
+        self.context = context;
+        self
     }
 
     fn build_request(&self, ctx: &StepContext<'_>) -> ModelRequest {
@@ -53,9 +62,15 @@ impl InferenceOperation {
             system.push_str("\n\n");
             system.push_str(part);
         }
-        // The model sees the compacted view: the latest summary, then newer messages.
+        // The model sees the compacted view: the latest summary, then newer
+        // messages, with older tool outputs shrunk if they would overflow.
+        let mut view = model_view(&ctx.session.messages);
+        if let Some(context) = &self.context {
+            let budget = context.message_budget(system.len(), ctx.tools, self.settings.max_tokens);
+            view = fit_tool_outputs(view, budget);
+        }
         let mut request =
-            ModelRequest::conversation(self.settings.capability.clone(), model_view(&ctx.session.messages))
+            ModelRequest::conversation(self.settings.capability.clone(), view)
                 .with_system_prompt(system)
                 .with_tools(ctx.tools.to_vec());
         request.profile = self.settings.profile.clone();

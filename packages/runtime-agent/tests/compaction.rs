@@ -204,3 +204,62 @@ fn bad_settings_are_rejected() {
         assert!(matches!(result, Err(AgentError::Config(_))));
     }
 }
+
+mod fitting {
+    use runtime_agent::conversation::{estimate_tokens, fit_tool_outputs, ELIDED_TOOL_OUTPUT};
+    use serde_json::json;
+    use shared::model::{ContentBlock, Message, Role, ToolCall, ToolResult};
+
+    fn call(id: &str) -> Message {
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolCall(ToolCall { id: id.into(), name: "read_file".into(), arguments: json!({"path": id}) })],
+        }
+    }
+
+    fn output(id: &str, chars: usize) -> Message {
+        Message::tool_results([ToolResult { call_id: id.into(), content: "x".repeat(chars), is_error: false }])
+    }
+
+    fn result_text(m: &Message) -> &str {
+        &m.tool_result_blocks().next().unwrap().content
+    }
+
+    #[test]
+    fn a_view_that_fits_is_unchanged() {
+        let view = vec![Message::user("go"), call("a"), output("a", 4_000)];
+        assert_eq!(fit_tool_outputs(view.clone(), 10_000), view);
+    }
+
+    #[test]
+    fn older_outputs_are_elided_oldest_first_and_the_latest_is_kept() {
+        let view = vec![
+            Message::user("go"),
+            call("a"), output("a", 8_000),
+            call("b"), output("b", 8_000),
+            call("c"), output("c", 8_000),
+        ];
+        // ~6,000 tokens in all; a 4,500 budget needs only the oldest output removed.
+        let fitted = fit_tool_outputs(view, 4_500);
+        assert_eq!(result_text(&fitted[2]), ELIDED_TOOL_OUTPUT);
+        assert_eq!(result_text(&fitted[4]).len(), 8_000);
+        assert_eq!(result_text(&fitted[6]).len(), 8_000);
+        assert!(estimate_tokens(&fitted) <= 4_500);
+        assert_eq!(fitted[1], call("a"), "calls and their arguments are kept");
+    }
+
+    #[test]
+    fn a_single_huge_output_is_cut_to_fit() {
+        let view = vec![Message::user("go"), call("a"), output("a", 30_000)];
+        let fitted = fit_tool_outputs(view, 2_000);
+        assert!(estimate_tokens(&fitted) <= 2_000, "got {}", estimate_tokens(&fitted));
+        assert!(result_text(&fitted[2]).contains("characters omitted"));
+    }
+
+    #[test]
+    fn small_outputs_are_left_alone() {
+        let view = vec![Message::user(&"q".repeat(8_000)), call("a"), output("a", 100), call("b"), output("b", 100)];
+        let fitted = fit_tool_outputs(view.clone(), 500);
+        assert_eq!(fitted, view, "nothing worth removing, so the view is returned as is");
+    }
+}

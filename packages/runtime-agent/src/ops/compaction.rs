@@ -8,17 +8,20 @@
 //! history is append-only, so nothing is lost on disk, and summaries chain:
 //! a later summary is written from the earlier one plus what followed.
 //!
-//! Compaction only happens at the start of a request, never in the middle of
-//! a tool loop. If the summary call fails, the turn continues uncompacted and
+//! Summaries are only written at the start of a request, never in the middle
+//! of a tool loop. Within a loop, `InferenceOperation` instead shrinks older
+//! tool outputs in what it sends (`fit_tool_outputs`). If the summary call fails, the turn continues uncompacted and
 //! compaction is not retried for that request.
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use sdk::model::ModelRuntime;
-use shared::model::{Message, ModelCapability, ModelRequest};
+use shared::model::{Message, ModelCapability, ModelRequest, ToolSpec};
 
-use crate::conversation::{awaiting_model, estimate_tokens, is_kickoff, latest_summary, model_view};
+use crate::conversation::{
+    awaiting_model, estimate_tokens, fit_tool_outputs, is_kickoff, latest_summary, model_view,
+};
 use crate::error::AgentError;
 use crate::operation::{Operation, OperationResult, StepContext};
 
@@ -31,6 +34,20 @@ pub struct CompactionSettings {
     /// Capability used for the summary call.
     pub capability: ModelCapability,
     pub max_summary_tokens: u32,
+}
+
+impl CompactionSettings {
+    /// Tokens left for messages once the system prompt, the tool specs and
+    /// room for a `reply_tokens` reply are taken out of the window.
+    pub fn message_budget(&self, system_chars: usize, tools: &[ToolSpec], reply_tokens: u32) -> usize {
+        let tools_chars: usize = tools
+            .iter()
+            .map(|t| t.name.len() + t.description.len() + t.input_schema.to_string().len())
+            .sum();
+        self.context_tokens
+            .saturating_sub((system_chars + tools_chars) / 4)
+            .saturating_sub(reply_tokens as usize)
+    }
 }
 
 impl Default for CompactionSettings {
@@ -96,8 +113,12 @@ impl Operation for CompactionOperation {
         }
 
         // Summarise everything before the current request, as the model sees it
-        // (which includes any earlier summary).
-        let mut to_summarise = model_view(&messages[..kickoff]);
+        // (which includes any earlier summary), with old tool outputs shrunk
+        // so the summary request itself fits the window.
+        let budget = self
+            .settings
+            .message_budget(SUMMARIZER_PROMPT.len() + SUMMARY_REQUEST.len(), &[], self.settings.max_summary_tokens);
+        let mut to_summarise = fit_tool_outputs(model_view(&messages[..kickoff]), budget);
         to_summarise.push(Message::user(SUMMARY_REQUEST));
         let mut request = ModelRequest::conversation(self.settings.capability.clone(), to_summarise)
             .with_system_prompt(SUMMARIZER_PROMPT);

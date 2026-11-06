@@ -87,6 +87,95 @@ pub fn estimate_tokens(messages: &[Message]) -> usize {
     chars / 4 + messages.len() * 4
 }
 
+/// Replaces an older tool output that no longer fits the context window.
+pub const ELIDED_TOOL_OUTPUT: &str = "[This earlier tool output was removed to fit the context window. \
+    Call the tool again if you need it.]";
+
+/// Outputs shorter than this are never elided: removing them saves little.
+const MIN_ELIDE_CHARS: usize = 400;
+
+/// Fits a model view into `budget_tokens` by shrinking tool outputs, the
+/// bulk of a long tool loop (after Codex's and Goose's tool-output pruning).
+///
+/// 1. Older tool outputs are replaced by [`ELIDED_TOOL_OUTPUT`], oldest
+///    first, until the view fits. The most recent tool-result message is
+///    kept, since the model is about to act on it.
+/// 2. If the view still does not fit, the most recent outputs are cut to
+///    share what budget is left, keeping their start and end.
+///
+/// Calls, their arguments and all text are kept, so the model still sees
+/// what it did. Only the view changes; stored history is untouched.
+pub fn fit_tool_outputs(mut view: Vec<Message>, budget_tokens: usize) -> Vec<Message> {
+    let over = |view: &[Message]| estimate_tokens(view) > budget_tokens;
+    if !over(&view) {
+        return view;
+    }
+    let result_messages: Vec<usize> = view
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.role == Role::User && m.tool_result_blocks().next().is_some())
+        .map(|(i, _)| i)
+        .collect();
+    let Some((&latest, older)) = result_messages.split_last() else {
+        return view;
+    };
+
+    // 1. Elide older outputs, oldest first.
+    'elide: for &index in older {
+        for block in &mut view[index].content {
+            if let ContentBlock::ToolResult(result) = block {
+                if result.content.chars().count() >= MIN_ELIDE_CHARS {
+                    result.content = ELIDED_TOOL_OUTPUT.to_string();
+                }
+            }
+        }
+        if !over(&view) {
+            break 'elide;
+        }
+    }
+    if !over(&view) {
+        return view;
+    }
+
+    // 2. Cut the latest outputs to share the remaining budget.
+    let latest_chars = |view: &[Message]| -> usize {
+        view[latest]
+            .content
+            .iter()
+            .map(|b| match b {
+                ContentBlock::ToolResult(r) => r.content.len(),
+                _ => 0,
+            })
+            .sum()
+    };
+    let others = estimate_tokens(&view).saturating_sub(latest_chars(&view) / 4);
+    let available_chars = budget_tokens.saturating_sub(others) * 4;
+    let large = view[latest]
+        .content
+        .iter()
+        .filter(|b| matches!(b, ContentBlock::ToolResult(r) if r.content.chars().count() >= MIN_ELIDE_CHARS))
+        .count()
+        .max(1);
+    let small_chars: usize = view[latest]
+        .content
+        .iter()
+        .map(|b| match b {
+            ContentBlock::ToolResult(r) if r.content.chars().count() < MIN_ELIDE_CHARS => r.content.len(),
+            _ => 0,
+        })
+        .sum();
+    // Leave room for the "characters omitted" marker in each cut output.
+    let share = (available_chars.saturating_sub(small_chars) / large).saturating_sub(64).max(MIN_ELIDE_CHARS);
+    for block in &mut view[latest].content {
+        if let ContentBlock::ToolResult(result) = block {
+            if result.content.chars().count() > share {
+                result.content = crate::tool::truncate_output(&result.content, share);
+            }
+        }
+    }
+    view
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

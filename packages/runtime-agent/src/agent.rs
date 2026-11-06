@@ -172,10 +172,12 @@ impl AgentBuilder {
             ToolExecutionOperation::new(self.tools, self.tool_limits)?.with_approver(self.approver),
         ));
         operations.push(Arc::new(MaxTurnsOperation::new(self.max_turns)));
-        if let Some(settings) = self.compaction {
+        if let Some(settings) = self.compaction.clone() {
             operations.push(Arc::new(CompactionOperation::new(self.model.clone(), settings)));
         }
-        operations.push(Arc::new(InferenceOperation::new(self.model, self.settings)));
+        operations.push(Arc::new(
+            InferenceOperation::new(self.model, self.settings).with_context(self.compaction),
+        ));
         Ok(Agent { machine: StateMachine::new(operations, self.store.clone())?, store: self.store })
     }
 }

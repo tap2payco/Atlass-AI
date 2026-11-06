@@ -87,7 +87,8 @@ Order matters: step 1 unblocks everything else.
    - *`CompactionOperation` runs when a new request arrives and the estimated request (about 4 characters per token) is over 75% of the context window. It summarises everything before that request and appends a `ContentBlock::Summary` covering it. The model then sees the latest summary plus the newer messages (`model_view`); summaries chain, and stored history is never rewritten.*
    - *A failed summary call does not block the turn and is not retried within that request.*
    - *`atlas-cli` enables it with the same window it now requests from Ollama: `ATLAS_OLLAMA_NUM_CTX`, default 8192, where previously Ollama used its own small default and silently dropped old context. `ATLAS_CONTEXT_TOKENS` overrides the window.*
-   - *Not done: tool-pair summarisation inside a long tool loop, real token counting, and `runtime-context` budgeting.*
+   - *Inside a long tool loop, `fit_tool_outputs` keeps each request within the window: older tool outputs are replaced by a short note, oldest first, and if that is not enough the latest outputs are cut, keeping their start and end. Calls and text are kept, and only what is sent changes. The summary request is fitted the same way.*
+   - *Not done: real token counting and `runtime-context` budgeting.*
 7. Then wire the stubbed context providers (memory, knowledge graph, git) as operations contributing `prompt_parts`.
 
 The board's Sprint 5–9 rows should be reset to **L0** until these packages exist.
