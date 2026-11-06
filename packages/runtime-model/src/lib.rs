@@ -105,12 +105,15 @@ impl ModelRuntime {
         let mut providers: Vec<Arc<dyn ModelProvider>> = Vec::new();
 
         // Always add Ollama (it will report Offline if not running)
-        providers.push(Arc::new(OllamaProvider::with_model_override(
-            config.ollama_base_url.clone(),
-            local_registry.clone(),
-            profile_registry.clone(),
-            config.ollama_model_override.clone(),
-        )));
+        providers.push(Arc::new(
+            OllamaProvider::with_model_override(
+                config.ollama_base_url.clone(),
+                local_registry.clone(),
+                profile_registry.clone(),
+                config.ollama_model_override.clone(),
+            )
+            .with_num_ctx(config.ollama_num_ctx),
+        ));
 
         // Add Fireworks only if an API key is present
         if let Some(ref key) = config.fireworks_api_key {

@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use runtime_agent::{
-    Agent, AgentError, AgentEvent, EventSink, FileSessionStore, InMemorySessionStore,
-    InferenceSettings, SessionStore, SessionSummary, StopCause, Tool, TurnOutcome,
+    Agent, AgentError, AgentEvent, CompactionSettings, EventSink, FileSessionStore,
+    InMemorySessionStore, InferenceSettings, SessionStore, SessionSummary, StopCause, Tool, TurnOutcome,
 };
 use runtime_model::{ModelRuntime, ModelRuntimeConfig};
 use shared::error::InferenceError;
@@ -126,6 +126,8 @@ pub struct CliAgent {
     saved: Option<Arc<FileSessionStore>>,
     /// Kept across rebuilds so "always" answers survive an access change.
     console: Arc<ConsoleApprover>,
+    /// Summarise older history near this many tokens. Off when `None`.
+    compaction: Option<CompactionSettings>,
     ollama_url: String,
 }
 
@@ -141,6 +143,13 @@ impl CliAgent {
     ) -> Result<Self, String> {
         let config = ModelRuntimeConfig::from_env();
         let ollama_url = config.ollama_base_url.clone();
+        // Plan compaction around the window Ollama is asked for, unless overridden.
+        let context_tokens = std::env::var("ATLAS_CONTEXT_TOKENS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .or(config.ollama_num_ctx.map(|n| n as usize))
+            .unwrap_or(runtime_model::config::DEFAULT_OLLAMA_NUM_CTX as usize);
         let model = Arc::new(ModelRuntime::build(config).await);
         let saved = match FileSessionStore::open(sessions_dir()) {
             Ok(store) => Some(Arc::new(store)),
@@ -149,7 +158,15 @@ impl CliAgent {
                 None
             }
         };
-        Self::build(root, max_turns, access, approval, model, ollama_url, saved).await
+        let mut agent = Self::build(root, max_turns, access, approval, model, ollama_url, saved).await?;
+        agent.set_compaction(Some(CompactionSettings { context_tokens, ..CompactionSettings::default() }))?;
+        Ok(agent)
+    }
+
+    /// Turn context compaction on (with these settings) or off. The conversation is kept.
+    pub fn set_compaction(&mut self, compaction: Option<CompactionSettings>) -> Result<(), String> {
+        let previous = std::mem::replace(&mut self.compaction, compaction);
+        self.rebuild().inspect_err(|_| self.compaction = previous.clone())
     }
 
     /// Build with a given model; conversations are kept in memory only.
@@ -202,6 +219,7 @@ impl CliAgent {
             store,
             saved,
             console,
+            compaction: None,
             ollama_url,
         };
         this.rebuild()?;
@@ -262,6 +280,9 @@ impl CliAgent {
             .settings(settings_for(&self.workspace, self.access))
             .max_turns(self.max_turns)
             .approver(approver_for(self.approval, &self.console));
+        if let Some(compaction) = &self.compaction {
+            builder = builder.compaction(compaction.clone());
+        }
         for tool in tools_for(self.access, &self.workspace) {
             builder = builder.tool(tool);
         }
@@ -418,6 +439,11 @@ async fn print_events(mut rx: tokio::sync::mpsc::UnboundedReceiver<AgentEvent>) 
                 }
             }
             AgentEvent::ToolDenied { name, .. } => println!("  ✗ {name} declined"),
+            AgentEvent::MessageAppended(m) => {
+                if let Some((_, covers)) = m.as_summary() {
+                    println!("  ⟳ summarised the {covers} earlier messages to stay within the context window");
+                }
+            }
             _ => {}
         }
     }

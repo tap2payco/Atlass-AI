@@ -83,6 +83,11 @@ Order matters: step 1 unblocks everything else.
    - *Not done: restricted tokens and workspace ACLs, network blocking (WFP), process-group kill on Unix, and the policy enums in `platform-contracts`.*
 5. **Make `runtime-bus` carry an Op/Event protocol** (`TurnInput`, `Interrupt`, `ApprovalResponse` / `MessageDelta`, `ToolCallBegin/End`, `ApprovalRequest`, `TurnComplete`). `atlas-cli` and `atlas-dashboard` become clients of it.
 6. **Compaction** as an operation (threshold + tool-pair summarization), backed by `runtime-context` budgeting.
+   *Status 2026-11-06, first part done:*
+   - *`CompactionOperation` runs when a new request arrives and the estimated request (about 4 characters per token) is over 75% of the context window. It summarises everything before that request and appends a `ContentBlock::Summary` covering it. The model then sees the latest summary plus the newer messages (`model_view`); summaries chain, and stored history is never rewritten.*
+   - *A failed summary call does not block the turn and is not retried within that request.*
+   - *`atlas-cli` enables it with the same window it now requests from Ollama: `ATLAS_OLLAMA_NUM_CTX`, default 8192, where previously Ollama used its own small default and silently dropped old context. `ATLAS_CONTEXT_TOKENS` overrides the window.*
+   - *Not done: tool-pair summarisation inside a long tool loop, real token counting, and `runtime-context` budgeting.*
 7. Then wire the stubbed context providers (memory, knowledge graph, git) as operations contributing `prompt_parts`.
 
 The board's Sprint 5–9 rows should be reset to **L0** until these packages exist.

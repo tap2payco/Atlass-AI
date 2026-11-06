@@ -11,7 +11,10 @@ use crate::error::AgentError;
 use crate::events::EventSink;
 use crate::machine::StateMachine;
 use crate::operation::{Operation, StopCause};
-use crate::ops::{InferenceOperation, InferenceSettings, MaxTurnsOperation, ToolExecutionOperation};
+use crate::ops::{
+    CompactionOperation, CompactionSettings, InferenceOperation, InferenceSettings, MaxTurnsOperation,
+    ToolExecutionOperation,
+};
 use crate::session::{Session, SessionStore};
 use crate::approval::{AutoApprove, ToolApprover};
 use crate::tool::{Tool, ToolLimits};
@@ -42,6 +45,7 @@ impl Agent {
             max_turns: DEFAULT_MAX_TURNS,
             tool_limits: ToolLimits::default(),
             approver: Arc::new(AutoApprove),
+            compaction: None,
         }
     }
 
@@ -105,6 +109,7 @@ pub struct AgentBuilder {
     max_turns: usize,
     tool_limits: ToolLimits,
     approver: Arc<dyn ToolApprover>,
+    compaction: Option<CompactionSettings>,
 }
 
 impl AgentBuilder {
@@ -144,15 +149,32 @@ impl AgentBuilder {
         self
     }
 
+    /// Summarise older history when the conversation nears the context
+    /// window. Off unless set.
+    pub fn compaction(mut self, settings: CompactionSettings) -> Self {
+        self.compaction = Some(settings);
+        self
+    }
+
     pub fn build(self) -> Result<Agent, AgentError> {
         if self.max_turns == 0 {
             return Err(AgentError::Config("max_turns must be at least 1".into()));
+        }
+        if let Some(c) = &self.compaction {
+            if c.context_tokens == 0 || !(0.1..=1.0).contains(&c.threshold) {
+                return Err(AgentError::Config(
+                    "compaction needs context_tokens > 0 and a threshold between 0.1 and 1.0".into(),
+                ));
+            }
         }
         let mut operations = self.extra_operations;
         operations.push(Arc::new(
             ToolExecutionOperation::new(self.tools, self.tool_limits)?.with_approver(self.approver),
         ));
         operations.push(Arc::new(MaxTurnsOperation::new(self.max_turns)));
+        if let Some(settings) = self.compaction {
+            operations.push(Arc::new(CompactionOperation::new(self.model.clone(), settings)));
+        }
         operations.push(Arc::new(InferenceOperation::new(self.model, self.settings)));
         Ok(Agent { machine: StateMachine::new(operations, self.store.clone())?, store: self.store })
     }

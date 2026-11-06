@@ -33,14 +33,19 @@ pub(crate) fn to_chat_turns(request: &ModelRequest) -> Vec<ChatTurn> {
         .collect();
 
     for message in &request.messages {
-        let mut texts = Vec::new();
+        let mut texts: Vec<String> = Vec::new();
         let mut calls = Vec::new();
         let mut results = Vec::new();
         for block in &message.content {
             match block {
-                ContentBlock::Text { text } => texts.push(text.as_str()),
+                ContentBlock::Text { text } => texts.push(text.clone()),
                 ContentBlock::ToolCall(call) => calls.push(call.clone()),
                 ContentBlock::ToolResult(result) => results.push(result),
+                // Normally replaced by the agent's view building; sent as
+                // plain text if a caller passes one through.
+                ContentBlock::Summary { text, .. } => {
+                    texts.push(format!("Summary of the earlier conversation:\n{text}"))
+                }
             }
         }
         let text = texts.join("\n");

@@ -122,6 +122,11 @@ pub enum ContentBlock {
     Text { text: String },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
+    /// A summary that replaces the first `covers` messages of the stored
+    /// conversation when it is sent to a model (context compaction). Stored
+    /// histories are append-only, so the summarised messages are kept on
+    /// disk; only the model's view of them changes.
+    Summary { text: String, covers: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -169,6 +174,19 @@ impl Message {
     pub fn tool_result_blocks(&self) -> impl Iterator<Item = &ToolResult> {
         self.content.iter().filter_map(|b| match b {
             ContentBlock::ToolResult(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// A user-role message holding a compaction summary.
+    pub fn summary(text: impl Into<String>, covers: usize) -> Self {
+        Self { role: Role::User, content: vec![ContentBlock::Summary { text: text.into(), covers }] }
+    }
+
+    /// The summary block's text and coverage, if this is a summary message.
+    pub fn as_summary(&self) -> Option<(&str, usize)> {
+        self.content.iter().find_map(|b| match b {
+            ContentBlock::Summary { text, covers } => Some((text.as_str(), *covers)),
             _ => None,
         })
     }

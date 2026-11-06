@@ -9,6 +9,7 @@
 /// |---|---|---|
 /// | `ATLAS_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 /// | `ATLAS_OLLAMA_MODEL` | _(none)_ | Use this Ollama model for every non-embedding request, instead of the per-profile model lists |
+/// | `ATLAS_OLLAMA_NUM_CTX` | `8192` | Context window requested from Ollama (`0` = Ollama's own default) |
 /// | `ATLAS_FIREWORKS_API_KEY` | _(none)_ | Enables Fireworks provider |
 /// | `ATLAS_MODEL_PRIVACY_MODE` | `false` | Block all external providers |
 /// | `ATLAS_MODEL_CACHE_MAX` | `256` | Max cached responses |
@@ -19,6 +20,9 @@ use std::time::Duration;
 
 use crate::circuit_breaker::CircuitBreakerConfig;
 
+/// Context window requested from Ollama unless `ATLAS_OLLAMA_NUM_CTX` says otherwise.
+pub const DEFAULT_OLLAMA_NUM_CTX: u32 = 8_192;
+
 #[derive(Debug, Clone)]
 pub struct ModelRuntimeConfig {
     /// Base URL for the local Ollama instance.
@@ -27,6 +31,11 @@ pub struct ModelRuntimeConfig {
     /// When set, Ollama serves every non-embedding capability with this model
     /// instead of resolving one from the profile lists.
     pub ollama_model_override: Option<String>,
+
+    /// Context window, in tokens, requested from Ollama on every chat call.
+    /// `None` leaves Ollama's own default (often 2–4k), which silently drops
+    /// the start of longer conversations.
+    pub ollama_num_ctx: Option<u32>,
 
     /// API key for Fireworks AI. If `None`, the Fireworks provider is not registered.
     pub fireworks_api_key: Option<String>,
@@ -54,6 +63,7 @@ impl Default for ModelRuntimeConfig {
         Self {
             ollama_base_url: "http://localhost:11434".into(),
             ollama_model_override: None,
+            ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
             fireworks_api_key: None,
             privacy_mode: false,
             cache_max_entries: 256,
@@ -79,6 +89,11 @@ impl ModelRuntimeConfig {
             let model = model.trim().to_string();
             if !model.is_empty() {
                 config.ollama_model_override = Some(model);
+            }
+        }
+        if let Ok(val) = std::env::var("ATLAS_OLLAMA_NUM_CTX") {
+            if let Ok(n) = val.trim().parse::<u32>() {
+                config.ollama_num_ctx = (n > 0).then_some(n);
             }
         }
         if let Ok(key) = std::env::var("ATLAS_FIREWORKS_API_KEY") {

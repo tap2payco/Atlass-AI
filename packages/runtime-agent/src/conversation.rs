@@ -49,6 +49,44 @@ pub fn awaiting_model(messages: &[Message]) -> bool {
     messages.last().is_some_and(|m| m.role == Role::User)
 }
 
+/// The latest compaction summary: its text and how many leading messages it covers.
+pub fn latest_summary(messages: &[Message]) -> Option<(&str, usize)> {
+    messages.iter().rev().find_map(Message::as_summary)
+}
+
+/// The conversation as the model should see it. With no summary, all
+/// messages. Otherwise the latest summary (as a user message), then every
+/// message after the part it covers, leaving out summary messages.
+pub fn model_view(messages: &[Message]) -> Vec<Message> {
+    let Some((text, covers)) = latest_summary(messages) else {
+        return messages.to_vec();
+    };
+    let mut view = vec![Message::user(format!("Summary of the earlier conversation:\n{text}"))];
+    view.extend(
+        messages[covers.min(messages.len())..]
+            .iter()
+            .filter(|m| m.as_summary().is_none())
+            .cloned(),
+    );
+    view
+}
+
+/// A rough token count (about 4 characters per token), enough to decide
+/// when to compact. Counts text, tool arguments, tool results and summaries.
+pub fn estimate_tokens(messages: &[Message]) -> usize {
+    let chars: usize = messages
+        .iter()
+        .flat_map(|m| &m.content)
+        .map(|block| match block {
+            ContentBlock::Text { text } => text.len(),
+            ContentBlock::ToolCall(call) => call.name.len() + call.arguments.to_string().len(),
+            ContentBlock::ToolResult(result) => result.content.len(),
+            ContentBlock::Summary { text, .. } => text.len(),
+        })
+        .sum();
+    chars / 4 + messages.len() * 4
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

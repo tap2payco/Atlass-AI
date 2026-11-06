@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use sdk::model::ModelRuntime;
 use shared::model::{CapabilityProfile, ExecutionPolicy, ModelCapability, ModelRequest};
 
-use crate::conversation::awaiting_model;
+use crate::conversation::{awaiting_model, model_view};
 use crate::error::AgentError;
 use crate::operation::{Operation, OperationResult, StepContext, StopCause};
 
@@ -53,8 +53,9 @@ impl InferenceOperation {
             system.push_str("\n\n");
             system.push_str(part);
         }
+        // The model sees the compacted view: the latest summary, then newer messages.
         let mut request =
-            ModelRequest::conversation(self.settings.capability.clone(), ctx.session.messages.clone())
+            ModelRequest::conversation(self.settings.capability.clone(), model_view(&ctx.session.messages))
                 .with_system_prompt(system)
                 .with_tools(ctx.tools.to_vec());
         request.profile = self.settings.profile.clone();

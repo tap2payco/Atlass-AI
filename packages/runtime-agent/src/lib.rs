@@ -49,7 +49,7 @@ pub use error::AgentError;
 pub use events::{AgentEvent, EventSink};
 pub use machine::StateMachine;
 pub use operation::{Operation, OperationResult, RunStatus, StepContext, StopCause};
-pub use ops::InferenceSettings;
+pub use ops::{CompactionSettings, InferenceSettings};
 pub use file_store::{FileSessionStore, SessionSummary};
 pub use session::{InMemorySessionStore, Session, SessionStore};
 pub use approval::{ApprovalDecision, AutoApprove, ToolApprover};

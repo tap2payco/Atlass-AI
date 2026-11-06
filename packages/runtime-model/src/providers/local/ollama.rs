@@ -83,6 +83,10 @@ struct OllamaFunctionCall {
 struct OllamaOptions {
     num_predict: u32,
     temperature: f32,
+    /// Context window. Ollama's default is small (2–4k tokens) and it drops
+    /// the oldest part of a longer prompt without telling the caller.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_ctx: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +126,8 @@ pub struct OllamaProvider {
     capabilities: Vec<ModelCapability>,
     /// `ATLAS_OLLAMA_MODEL`: serves every non-embedding capability.
     model_override: Option<String>,
+    /// `ATLAS_OLLAMA_NUM_CTX`: context window sent with every chat request.
+    num_ctx: Option<u32>,
 }
 
 /// Capabilities an explicitly chosen chat model is asked to serve.
@@ -172,6 +178,21 @@ impl OllamaProvider {
             profile_registry,
             capabilities: caps,
             model_override,
+            num_ctx: None,
+        }
+    }
+
+    /// Ask Ollama for a context window of `num_ctx` tokens on every chat request.
+    pub fn with_num_ctx(mut self, num_ctx: Option<u32>) -> Self {
+        self.num_ctx = num_ctx;
+        self
+    }
+
+    fn options(&self, request: &ModelRequest) -> OllamaOptions {
+        OllamaOptions {
+            num_predict: request.max_tokens,
+            temperature: request.temperature,
+            num_ctx: self.num_ctx,
         }
     }
 
@@ -299,10 +320,7 @@ impl ModelProvider for OllamaProvider {
             messages: Self::build_messages(request),
             tools: Self::build_tools(&request.tools),
             stream: false,
-            options: OllamaOptions {
-                num_predict: request.max_tokens,
-                temperature: request.temperature,
-            },
+            options: self.options(request),
         };
 
         let url = format!("{}/api/chat", self.base_url);
@@ -372,10 +390,7 @@ impl ModelProvider for OllamaProvider {
             messages: Self::build_messages(request),
             tools: Vec::new(),
             stream: true,
-            options: OllamaOptions {
-                num_predict: request.max_tokens,
-                temperature: request.temperature,
-            },
+            options: self.options(request),
         };
 
         let url = format!("{}/api/chat", self.base_url);
