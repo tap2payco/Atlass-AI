@@ -17,7 +17,10 @@ use crate::ops::{
 };
 use crate::session::{Session, SessionStore};
 use crate::approval::{AutoApprove, ToolApprover};
+use crate::cognition::{CognitionSettings, CognitiveOperation};
+use crate::context::{ContextOperation, ContextSource};
 use crate::tool::{Tool, ToolLimits};
+use crate::tool_registry::{ToolRegistry, BUILTIN_PROVIDER, DEFAULT_TOOL_PRIORITY};
 
 pub const DEFAULT_MAX_TURNS: usize = 25;
 
@@ -39,7 +42,9 @@ impl Agent {
         AgentBuilder {
             model,
             store,
-            tools: Vec::new(),
+            tools: ToolRegistry::new(),
+            context_operations: Vec::new(),
+            cognition: None,
             extra_operations: Vec::new(),
             settings: InferenceSettings::default(),
             max_turns: DEFAULT_MAX_TURNS,
@@ -103,7 +108,9 @@ impl Agent {
 pub struct AgentBuilder {
     model: Arc<dyn ModelRuntime>,
     store: Arc<dyn SessionStore>,
-    tools: Vec<Arc<dyn Tool>>,
+    tools: ToolRegistry,
+    context_operations: Vec<Arc<dyn Operation>>,
+    cognition: Option<Arc<CognitionSettings>>,
     extra_operations: Vec<Arc<dyn Operation>>,
     settings: InferenceSettings,
     max_turns: usize,
@@ -127,7 +134,29 @@ impl AgentBuilder {
     }
 
     pub fn tool(mut self, tool: Arc<dyn Tool>) -> Self {
-        self.tools.push(tool);
+        self.tools.register(tool, BUILTIN_PROVIDER, DEFAULT_TOOL_PRIORITY);
+        self
+    }
+
+    /// Add a tool from `provider` (e.g. an MCP server). If several providers
+    /// offer a tool with the same name, the highest `priority` wins
+    /// (`tool` uses `DEFAULT_TOOL_PRIORITY`); equal top priorities are an error.
+    pub fn tool_from(mut self, tool: Arc<dyn Tool>, provider: &str, priority: u8) -> Self {
+        self.tools.register(tool, provider, priority);
+        self
+    }
+
+    /// Add workspace context (git, memory, …) to the system prompt of every
+    /// model call, gathered once per user request.
+    pub fn context(mut self, source: Arc<dyn ContextSource>) -> Self {
+        self.context_operations.push(Arc::new(ContextOperation::new(source)));
+        self
+    }
+
+    /// Turn on the cognitive-state operations (Understanding, Planning,
+    /// Execution, Review, Reflection) and their model routing. Off unless set.
+    pub fn cognitive(mut self, settings: CognitionSettings) -> Self {
+        self.cognition = Some(Arc::new(settings));
         self
     }
 
@@ -167,16 +196,22 @@ impl AgentBuilder {
                 ));
             }
         }
-        let mut operations = self.extra_operations;
+        let mut operations = self.context_operations;
+        if let Some(cognition) = &self.cognition {
+            operations.extend(CognitiveOperation::all(cognition.clone()));
+        }
+        operations.extend(self.extra_operations);
         operations.push(Arc::new(
-            ToolExecutionOperation::new(self.tools, self.tool_limits)?.with_approver(self.approver),
+            ToolExecutionOperation::new(self.tools.resolved()?, self.tool_limits)?.with_approver(self.approver),
         ));
         operations.push(Arc::new(MaxTurnsOperation::new(self.max_turns)));
         if let Some(settings) = self.compaction.clone() {
             operations.push(Arc::new(CompactionOperation::new(self.model.clone(), settings)));
         }
         operations.push(Arc::new(
-            InferenceOperation::new(self.model, self.settings).with_context(self.compaction),
+            InferenceOperation::new(self.model, self.settings)
+                .with_context(self.compaction)
+                .with_router(self.cognition),
         ));
         Ok(Agent { machine: StateMachine::new(operations, self.store.clone())?, store: self.store })
     }

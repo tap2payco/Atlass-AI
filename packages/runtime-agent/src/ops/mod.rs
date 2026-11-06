@@ -1,5 +1,7 @@
 //! Built-in operations. The default order is:
-//! extra operations → tool execution → max turns → compaction (if enabled) → inference.
+//! context sources → cognitive states (if enabled) → extra operations →
+//! tool execution → max turns → compaction (if enabled) → inference.
+//! Context and cognitive operations only add prompt parts; they never apply.
 
 mod compaction;
 mod inference;

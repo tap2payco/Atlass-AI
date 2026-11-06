@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use sdk::model::ModelRuntime;
 use shared::model::{CapabilityProfile, ExecutionPolicy, ModelCapability, ModelRequest};
 
+use crate::cognition::CognitionSettings;
 use crate::conversation::{awaiting_model, fit_tool_outputs, model_view};
 use crate::ops::CompactionSettings;
 use crate::error::AgentError;
@@ -43,16 +44,24 @@ pub struct InferenceOperation {
     settings: InferenceSettings,
     /// When set, the request is fitted into this context window.
     context: Option<CompactionSettings>,
+    /// When set, picks the capability per cognitive state.
+    router: Option<Arc<CognitionSettings>>,
 }
 
 impl InferenceOperation {
     pub fn new(model: Arc<dyn ModelRuntime>, settings: InferenceSettings) -> Self {
-        Self { model, settings, context: None }
+        Self { model, settings, context: None, router: None }
     }
 
     /// Shrink tool outputs in each request so it fits the window.
     pub fn with_context(mut self, context: Option<CompactionSettings>) -> Self {
         self.context = context;
+        self
+    }
+
+    /// Route each request by the cognitive state the conversation is in.
+    pub fn with_router(mut self, router: Option<Arc<CognitionSettings>>) -> Self {
+        self.router = router;
         self
     }
 
@@ -69,8 +78,13 @@ impl InferenceOperation {
             let budget = context.message_budget(system.len(), ctx.tools, self.settings.max_tokens);
             view = fit_tool_outputs(view, budget);
         }
+        let capability = self
+            .router
+            .as_ref()
+            .and_then(|r| r.route(&ctx.session.messages))
+            .unwrap_or_else(|| self.settings.capability.clone());
         let mut request =
-            ModelRequest::conversation(self.settings.capability.clone(), view)
+            ModelRequest::conversation(capability, view)
                 .with_system_prompt(system)
                 .with_tools(ctx.tools.to_vec());
         request.profile = self.settings.profile.clone();

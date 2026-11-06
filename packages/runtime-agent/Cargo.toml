@@ -15,7 +15,9 @@ serde_json  = "1.0"
 thiserror   = "1.0"
 uuid        = "1.10"
 tracing     = "0.1"
+capability-registry = { path = "../capability-registry" }
+platform-contracts  = { path = "../platform-contracts" }
+runtime-memory      = { path = "../runtime-memory" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "macros", "rt", "rt-multi-thread", "time"] }
-platform-contracts = { path = "../platform-contracts" }

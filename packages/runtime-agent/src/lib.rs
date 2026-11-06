@@ -34,6 +34,8 @@
 
 pub mod agent;
 pub mod approval;
+pub mod cognition;
+pub mod context;
 pub mod conversation;
 pub mod error;
 pub mod events;
@@ -43,6 +45,7 @@ pub mod operation;
 pub mod ops;
 pub mod session;
 pub mod tool;
+pub mod tool_registry;
 
 pub use agent::{Agent, AgentBuilder, TurnOutcome, DEFAULT_MAX_TURNS};
 pub use error::AgentError;
@@ -54,3 +57,6 @@ pub use file_store::{FileSessionStore, SessionSummary};
 pub use session::{InMemorySessionStore, Session, SessionStore};
 pub use approval::{ApprovalDecision, AutoApprove, ToolApprover};
 pub use tool::{truncate_output, Tool, ToolEffect, ToolLimits};
+pub use cognition::{CognitionSettings, CognitiveState};
+pub use context::{ContextContribution, ContextSource, GitContext, KnowledgeGraphContext, MemoryContext};
+pub use tool_registry::{ToolRegistry, DEFAULT_TOOL_PRIORITY};

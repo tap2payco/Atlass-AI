@@ -84,6 +84,15 @@ impl StateMachine {
             }
 
             let session = self.store.load(session_id).await?;
+            for op in &self.operations {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {
+                        return self.finalize_cancelled(session_id, events).await;
+                    }
+                    result = op.prepare(&session) => result?,
+                }
+            }
             let prompt_parts: Vec<String> =
                 self.operations.iter().flat_map(|op| op.prompt_parts(&session)).collect();
             let ctx = StepContext {
