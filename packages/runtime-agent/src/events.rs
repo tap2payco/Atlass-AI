@@ -13,6 +13,8 @@ pub enum AgentEvent {
     MessageAppended(Message),
     /// A tool started running.
     ToolStarted { call_id: String, name: String },
+    /// The approver denied a tool call; it was not run.
+    ToolDenied { call_id: String, name: String },
     /// The run ended.
     Finished(StopCause),
 }

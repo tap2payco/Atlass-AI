@@ -3,8 +3,9 @@
 //! The state machine reloads the session from the store after every step, so
 //! the store is the single source of truth for a running agent.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use shared::id::SessionId;
@@ -15,13 +16,37 @@ use crate::error::AgentError;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
     pub id: SessionId,
+    /// Seconds since the Unix epoch.
+    pub created_at: u64,
+    /// Free-form labels set by the front end, e.g. the workspace path.
+    pub metadata: BTreeMap<String, String>,
     /// Conversation, oldest first.
     pub messages: Vec<Message>,
 }
 
 impl Session {
     pub fn new() -> Self {
-        Self { id: SessionId::new(), messages: Vec::new() }
+        Self::with_metadata(BTreeMap::new())
+    }
+
+    pub fn with_metadata(metadata: BTreeMap<String, String>) -> Self {
+        Self { id: SessionId::new(), created_at: now_secs(), metadata, messages: Vec::new() }
+    }
+
+    /// The text of the first user message, shortened, for session lists.
+    pub fn title(&self, max_chars: usize) -> String {
+        let text = self
+            .messages
+            .iter()
+            .find(|m| crate::conversation::is_kickoff(m))
+            .map(Message::text)
+            .unwrap_or_default();
+        let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if one_line.chars().count() > max_chars {
+            format!("{}…", one_line.chars().take(max_chars).collect::<String>())
+        } else {
+            one_line
+        }
     }
 }
 
@@ -29,6 +54,10 @@ impl Default for Session {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub(crate) fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Persistence port for sessions. Implementations must make `append` atomic

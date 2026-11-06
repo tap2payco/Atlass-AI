@@ -13,6 +13,7 @@ use crate::machine::StateMachine;
 use crate::operation::{Operation, StopCause};
 use crate::ops::{InferenceOperation, InferenceSettings, MaxTurnsOperation, ToolExecutionOperation};
 use crate::session::{Session, SessionStore};
+use crate::approval::{AutoApprove, ToolApprover};
 use crate::tool::{Tool, ToolLimits};
 
 pub const DEFAULT_MAX_TURNS: usize = 25;
@@ -40,11 +41,21 @@ impl Agent {
             settings: InferenceSettings::default(),
             max_turns: DEFAULT_MAX_TURNS,
             tool_limits: ToolLimits::default(),
+            approver: Arc::new(AutoApprove),
         }
     }
 
     pub async fn create_session(&self) -> Result<SessionId, AgentError> {
-        let session = Session::new();
+        self.create_session_with(std::collections::BTreeMap::new()).await
+    }
+
+    /// Create a session carrying labels (e.g. the workspace path) that a
+    /// store such as `FileSessionStore` keeps with it.
+    pub async fn create_session_with(
+        &self,
+        metadata: std::collections::BTreeMap<String, String>,
+    ) -> Result<SessionId, AgentError> {
+        let session = Session::with_metadata(metadata);
         let id = session.id;
         self.store.create(session).await?;
         Ok(id)
@@ -93,9 +104,17 @@ pub struct AgentBuilder {
     settings: InferenceSettings,
     max_turns: usize,
     tool_limits: ToolLimits,
+    approver: Arc<dyn ToolApprover>,
 }
 
 impl AgentBuilder {
+    /// Asked before every tool call that can change something. Default:
+    /// `AutoApprove` (allow everything).
+    pub fn approver(mut self, approver: Arc<dyn ToolApprover>) -> Self {
+        self.approver = approver;
+        self
+    }
+
     /// Timeout and output cap applied to every tool call.
     pub fn tool_limits(mut self, limits: ToolLimits) -> Self {
         self.tool_limits = limits;
@@ -130,7 +149,9 @@ impl AgentBuilder {
             return Err(AgentError::Config("max_turns must be at least 1".into()));
         }
         let mut operations = self.extra_operations;
-        operations.push(Arc::new(ToolExecutionOperation::new(self.tools, self.tool_limits)?));
+        operations.push(Arc::new(
+            ToolExecutionOperation::new(self.tools, self.tool_limits)?.with_approver(self.approver),
+        ));
         operations.push(Arc::new(MaxTurnsOperation::new(self.max_turns)));
         operations.push(Arc::new(InferenceOperation::new(self.model, self.settings)));
         Ok(Agent { machine: StateMachine::new(operations, self.store.clone())?, store: self.store })

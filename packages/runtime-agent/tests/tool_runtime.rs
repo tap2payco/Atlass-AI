@@ -218,3 +218,76 @@ fn undeclared_effect_defaults_to_the_most_powerful() {
     }
     assert_eq!(Bare.effect(), ToolEffect::RunsProcesses);
 }
+
+// ── Approvals ─────────────────────────────────────────────────────────────────
+
+/// Records what it was asked about; denies writes, allows everything else.
+#[derive(Default)]
+struct DenyWrites {
+    asked: Mutex<Vec<(String, ToolEffect)>>,
+}
+
+#[async_trait]
+impl runtime_agent::ToolApprover for DenyWrites {
+    async fn approve(&self, call: &ToolCall, effect: ToolEffect) -> runtime_agent::ApprovalDecision {
+        self.asked.lock().unwrap().push((call.name.clone(), effect));
+        if effect == ToolEffect::WritesWorkspace {
+            runtime_agent::ApprovalDecision::Deny { reason: "edit the test file instead".into() }
+        } else {
+            runtime_agent::ApprovalDecision::Allow
+        }
+    }
+}
+
+#[tokio::test]
+async fn approver_is_asked_only_for_mutating_calls_and_denials_skip_the_tool() {
+    let log = Log::default();
+    let approver = Arc::new(DenyWrites::default());
+    let tools = vec![
+        Probe::new("read", ToolEffect::ReadOnly, &log),
+        Probe::new("write", ToolEffect::WritesWorkspace, &log),
+        Probe::new("cmd", ToolEffect::RunsProcesses, &log),
+    ];
+    let mut builder = Agent::builder(
+        CallsThenDone::new(vec![("r", "read"), ("w", "write"), ("c", "cmd")]),
+        Arc::new(InMemorySessionStore::new()),
+    )
+    .approver(approver.clone());
+    for tool in tools {
+        builder = builder.tool(Arc::new(tool));
+    }
+    let agent = builder.build().unwrap();
+    let session = agent.create_session().await.unwrap();
+    let (events, mut rx) = EventSink::channel();
+    agent.submit(session, "go", &CancellationToken::new(), &events).await.unwrap();
+    drop(events);
+
+    assert_eq!(
+        *approver.asked.lock().unwrap(),
+        [("write".to_string(), ToolEffect::WritesWorkspace), ("cmd".to_string(), ToolEffect::RunsProcesses)]
+    );
+    // The denied tool never ran; the others did.
+    assert_eq!(*log.lock().unwrap(), ["start:read", "end:read", "start:cmd", "end:cmd"]);
+
+    let results: Vec<ToolResult> = agent
+        .session(session)
+        .await
+        .unwrap()
+        .messages
+        .iter()
+        .flat_map(Message::tool_result_blocks)
+        .cloned()
+        .collect();
+    assert_eq!(results.len(), 3);
+    assert!(!results[0].is_error && !results[2].is_error);
+    assert!(results[1].is_error);
+    assert_eq!(results[1].content, "The user declined to run this tool call: edit the test file instead");
+
+    let mut denied = Vec::new();
+    while let Some(event) = rx.recv().await {
+        if let runtime_agent::AgentEvent::ToolDenied { name, .. } = event {
+            denied.push(name);
+        }
+    }
+    assert_eq!(denied, ["write"]);
+}

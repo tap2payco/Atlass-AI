@@ -1,10 +1,11 @@
 //! `run_command`: run a shell command in the workspace root.
 //!
-//! The command runs with the user's own permissions and environment. There is
-//! no sandbox or approval prompt yet (roadmap step 4), so the CLI only enables
-//! this tool when explicitly asked to. On timeout the shell process is killed;
-//! processes it started may keep running until step 4 adds Windows job
-//! objects (and process groups elsewhere).
+//! The command runs with the user's own permissions, minus environment
+//! variables that look like secrets (see `process::scrub_secrets`). On
+//! Windows it runs in a kill-on-close Job Object, so a timeout, a cancel, or
+//! the command finishing ends every process it started. There is no file or
+//! network sandbox yet; the CLI asks before each command unless `--approve
+//! auto` is set.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -15,6 +16,7 @@ use serde_json::{json, Value};
 use shared::model::ToolSpec;
 use tokio::process::Command;
 
+use super::process::{scrub_secrets, ProcessTree};
 use super::tools::{str_arg, Workspace};
 
 pub const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 60;
@@ -50,7 +52,9 @@ impl Tool for RunCommand {
             name: "run_command".into(),
             description: format!(
                 "Run a {shell_name} command in the workspace root and return its exit code, stdout \
-                 and stderr. Use it for builds, tests and git queries. Commands cannot read input."
+                 and stderr. Use it for builds, tests and git queries. Commands cannot read input, \
+                 cannot leave background processes running, and do not see environment variables \
+                 that hold keys, tokens, secrets or passwords."
             ),
             input_schema: json!({
                 "type": "object",
@@ -78,17 +82,26 @@ impl Tool for RunCommand {
             .unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECS)
             .clamp(1, MAX_COMMAND_TIMEOUT_SECS);
 
-        let child = shell(command)
+        let mut cmd = shell(command);
+        let removed = scrub_secrets(&mut cmd);
+        if !removed.is_empty() {
+            tracing::debug!(?removed, "removed secret-looking variables from the command environment");
+        }
+        let child = cmd
             .current_dir(self.workspace.root())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            // Dropping the future (timeout, cancel) kills the shell.
+            // Dropping the future (timeout, cancel) kills the shell…
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("could not start the command: {e}"))?;
+        // …and dropping this guard kills everything the shell started (Windows).
+        let tree = ProcessTree::contain(&child);
 
-        let output = match tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output()).await {
+        let waited = tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output()).await;
+        drop(tree);
+        let output = match waited {
             Ok(result) => result.map_err(|e| format!("command failed: {e}"))?,
             Err(_) => return Err(format!("command timed out after {timeout} seconds and was stopped")),
         };
@@ -143,5 +156,37 @@ mod tests {
     async fn requires_a_command() {
         let dir = TempDir::new();
         assert!(tool(&dir).call(json!({})).await.unwrap_err().contains("command"));
+    }
+
+    #[tokio::test]
+    async fn secret_looking_variables_are_hidden_from_commands() {
+        let dir = TempDir::new();
+        let name = format!("ATLAS_TEST_{}_TOKEN", std::process::id());
+        let plain = format!("ATLAS_TEST_{}_VISIBLE", std::process::id());
+        std::env::set_var(&name, "s3cr3t-value");
+        std::env::set_var(&plain, "plain-value");
+        let echo = if cfg!(windows) {
+            format!("echo [%{name}%] [%{plain}%]")
+        } else {
+            format!("echo [${name}] [${plain}]")
+        };
+        let out = tool(&dir).call(json!({ "command": echo })).await.unwrap();
+        std::env::remove_var(&name);
+        std::env::remove_var(&plain);
+        assert!(!out.contains("s3cr3t-value"), "{out}");
+        assert!(out.contains("plain-value"), "{out}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_timeout_also_kills_processes_the_command_started() {
+        let dir = TempDir::new();
+        // A background grandchild that would write late.txt after ~3 s, while the
+        // command itself keeps running past the 1 s timeout.
+        let command = r#"start "" /b cmd /c "ping -n 4 127.0.0.1 >NUL & echo late> late.txt" & ping -n 30 127.0.0.1 >NUL"#;
+        let err = tool(&dir).call(json!({ "command": command, "timeout_secs": 1 })).await.unwrap_err();
+        assert!(err.contains("timed out"), "{err}");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!dir.path().join("late.txt").exists(), "the background process outlived the command");
     }
 }

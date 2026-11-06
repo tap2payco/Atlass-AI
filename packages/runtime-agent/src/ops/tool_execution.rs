@@ -3,7 +3,8 @@
 //! Scheduling follows Codex's rule (read-only tools in parallel, anything that
 //! changes state alone) while keeping the model's call order: consecutive
 //! read-only calls form one parallel batch, and every other call runs by
-//! itself, after everything before it has finished.
+//! itself, after everything before it has finished. Each of those other calls
+//! is first put to the `ToolApprover`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use async_trait::async_trait;
 use shared::model::{Message, ToolCall, ToolResult, ToolSpec};
 use tokio::task::JoinSet;
 
+use crate::approval::{denied_message, ApprovalDecision, AutoApprove, ToolApprover};
 use crate::conversation::open_tool_calls;
 use crate::error::AgentError;
 use crate::events::{AgentEvent, EventSink};
@@ -22,9 +24,17 @@ pub struct ToolExecutionOperation {
     tools: HashMap<String, Arc<dyn Tool>>,
     specs: Vec<ToolSpec>,
     limits: ToolLimits,
+    approver: Arc<dyn ToolApprover>,
 }
 
 impl ToolExecutionOperation {
+    /// Use `with_approver` to ask before calls that change something; by
+    /// default every call is allowed.
+    pub fn with_approver(mut self, approver: Arc<dyn ToolApprover>) -> Self {
+        self.approver = approver;
+        self
+    }
+
     /// Fails if two tools share a name.
     pub fn new(tools: Vec<Arc<dyn Tool>>, limits: ToolLimits) -> Result<Self, AgentError> {
         let mut by_name = HashMap::new();
@@ -36,7 +46,7 @@ impl ToolExecutionOperation {
             }
             specs.push(spec);
         }
-        Ok(Self { tools: by_name, specs, limits })
+        Ok(Self { tools: by_name, specs, limits, approver: Arc::new(AutoApprove) })
     }
 
     fn is_parallel_safe(&self, call: &ToolCall) -> bool {
@@ -74,8 +84,18 @@ impl ToolExecutionOperation {
     }
 
     async fn run_one(&self, call: &ToolCall, events: &EventSink) -> ToolResult {
+        let tool = self.tools.get(&call.name).cloned();
+        if let Some(tool) = &tool {
+            let effect = tool.effect();
+            if effect != ToolEffect::ReadOnly {
+                if let ApprovalDecision::Deny { reason } = self.approver.approve(call, effect).await {
+                    events.emit(AgentEvent::ToolDenied { call_id: call.id.clone(), name: call.name.clone() });
+                    return error_result(call, &denied_message(&reason));
+                }
+            }
+        }
         events.emit(AgentEvent::ToolStarted { call_id: call.id.clone(), name: call.name.clone() });
-        execute(self.tools.get(&call.name).cloned(), call, self.limits).await
+        execute(tool, call, self.limits).await
     }
 }
 

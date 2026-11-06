@@ -108,6 +108,8 @@ dependencies = [
  "shared",
  "tokio",
  "tokio-util",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1419,12 +1421,14 @@ dependencies = [
  "async-trait",
  "platform-contracts",
  "sdk",
+ "serde",
  "serde_json",
  "shared",
  "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

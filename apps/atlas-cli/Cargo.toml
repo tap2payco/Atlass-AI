@@ -18,6 +18,15 @@ runtime-model = { path = "../../packages/runtime-model" }
 runtime-agent = { path = "../../packages/runtime-agent" }
 shared = { path = "../../packages/shared" }
 tokio-util = "0.7"
+tracing = "0.1"
 runtime-repository = { path = "../../packages/runtime-repository" }
 execution-core = { path = "../../packages/execution-core" }
 sdk = { path = "../../packages/sdk" }
+
+# Job Objects: kill a command's whole process tree (run_command).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+] }

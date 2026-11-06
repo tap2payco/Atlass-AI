@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use runtime_repository::discovery::{DiscoveryConfig, RepositoryDiscovery};
-use crate::agent::{Access, CliAgent};
+use crate::agent::{short_id, Access, ApprovalMode, CliAgent};
 use crate::commands::{boot, status, agent_run, query};
 
 /// The chat agent for the linked project, created on first use and replaced
@@ -10,21 +10,26 @@ async fn chat_agent<'a>(
     slot: &'a mut Option<CliAgent>,
     project: &Path,
     access: Access,
+    approval: ApprovalMode,
 ) -> Result<&'a CliAgent, String> {
     let stale = slot
         .as_ref()
         .is_none_or(|a| project.canonicalize().ok().as_deref() != Some(a.workspace_root()));
     if stale {
-        *slot = Some(CliAgent::start(project, runtime_agent::DEFAULT_MAX_TURNS, access).await?);
+        *slot = Some(CliAgent::start(project, runtime_agent::DEFAULT_MAX_TURNS, access, approval).await?);
     }
     Ok(slot.as_ref().expect("agent was just created"))
 }
 
-fn describe_access(access: Access) -> &'static str {
+fn describe_access(access: Access, approval: ApprovalMode) -> String {
+    let asking = match approval {
+        ApprovalMode::Ask => "asking you first",
+        ApprovalMode::Auto => "without asking",
+    };
     match access {
-        Access::Read => "read — the agent can only look at files",
-        Access::Write => "write — the agent can also create and edit files (not .git), without asking",
-        Access::Full => "full — the agent can also edit files and run shell commands, without asking",
+        Access::Read => "read — the agent can only look at files".to_string(),
+        Access::Write => format!("write — the agent can also create and edit files (not .git), {asking}"),
+        Access::Full => format!("full — the agent can also edit files and run shell commands, {asking}"),
     }
 }
 
@@ -33,6 +38,7 @@ pub async fn run_repl() -> Result<(), String> {
     let mut history: Vec<(String, String)> = Vec::new();
     let mut chat: Option<CliAgent> = None;
     let mut access = Access::Read;
+    let mut approval = ApprovalMode::Ask;
 
     println!("╭─────────────────────────────────────────────────────────────────────────────╮");
     println!("│ 🤖 Atlas AI Platform — Interactive Terminal Desktop Agent (Claude Code Style)│");
@@ -83,6 +89,9 @@ pub async fn run_repl() -> Result<(), String> {
                 println!("│ continue           - Let the agent keep going after a stop  │");
                 println!("│ new                - Start a fresh agent conversation       │");
                 println!("│ access <level>     - Agent tools: read | write | full       │");
+                println!("│ approve <mode>     - ask before writes/commands, or auto    │");
+                println!("│ sessions           - List saved conversations for the project│");
+                println!("│ resume <id|last>   - Continue a saved conversation          │");
                 println!("│ run <prompt>       - Run 5-phase agent task on linked project│");
                 println!("│ query <domain> <q> - Query memory or context                    │");
                 println!("│ clear              - Clear terminal output                  │");
@@ -166,7 +175,7 @@ pub async fn run_repl() -> Result<(), String> {
                 }
             }
             "access" => match parts.get(1) {
-                None => println!("Agent access: {}", describe_access(access)),
+                None => println!("Agent access: {}", describe_access(access, approval)),
                 Some(level) => match level.parse::<Access>() {
                     Err(e) => println!("{e}"),
                     Ok(level) => {
@@ -177,13 +186,64 @@ pub async fn run_repl() -> Result<(), String> {
                         match applied {
                             Ok(()) => {
                                 access = level;
-                                println!("Agent access: {}", describe_access(access));
+                                println!("Agent access: {}", describe_access(access, approval));
                             }
                             Err(e) => println!("Agent error: {}", e),
                         }
                     }
                 },
             },
+            "approve" => match parts.get(1) {
+                None => println!("Approval mode: {approval}"),
+                Some(mode) => match mode.parse::<ApprovalMode>() {
+                    Err(e) => println!("{e}"),
+                    Ok(mode) => {
+                        let applied = match chat.as_mut() {
+                            Some(agent) => agent.set_approval(mode),
+                            None => Ok(()),
+                        };
+                        match applied {
+                            Ok(()) => {
+                                approval = mode;
+                                println!("Agent access: {}", describe_access(access, approval));
+                            }
+                            Err(e) => println!("Agent error: {}", e),
+                        }
+                    }
+                },
+            },
+            "sessions" => match chat_agent(&mut chat, &active_project_path, access, approval).await {
+                Err(e) => println!("Agent error: {}", e),
+                Ok(agent) => match agent.saved_sessions() {
+                    Err(e) => println!("{e}"),
+                    Ok(list) if list.is_empty() => println!("No saved conversations for this project yet."),
+                    Ok(list) => {
+                        let current = agent.session_id();
+                        for s in list.iter().take(20) {
+                            let marker = if s.id == current { "*" } else { " " };
+                            let title = if s.title.is_empty() { "(empty)" } else { s.title.as_str() };
+                            println!("{marker} {}  {:>3} msgs  {}", short_id(s.id), s.message_count, title);
+                        }
+                        println!("Resume one with: resume <id>   (* = current)");
+                    }
+                },
+            },
+            "resume" => {
+                let query = parts.get(1).copied().unwrap_or("last");
+                let switched = match chat_agent(&mut chat, &active_project_path, access, approval).await {
+                    Err(e) => Err(e),
+                    Ok(_) => chat.as_mut().expect("agent exists").switch_to(query),
+                };
+                match switched {
+                    Ok(s) => println!(
+                        "Resumed {} ({} messages): {}. Type `continue` to finish an interrupted turn, or ask something new.",
+                        short_id(s.id),
+                        s.message_count,
+                        s.title
+                    ),
+                    Err(e) => println!("{e}"),
+                }
+            }
             "new" => match chat.as_mut() {
                 Some(agent) => match agent.reset().await {
                     Ok(()) => println!("Started a new agent conversation."),
@@ -202,7 +262,7 @@ pub async fn run_repl() -> Result<(), String> {
             _ => {
                 // Conversational prompt: one ongoing agent conversation per linked project.
                 let user_prompt = line.to_string();
-                let result = match chat_agent(&mut chat, &active_project_path, access).await {
+                let result = match chat_agent(&mut chat, &active_project_path, access, approval).await {
                     Ok(agent) => agent.ask(&user_prompt).await,
                     Err(e) => Err(e),
                 };

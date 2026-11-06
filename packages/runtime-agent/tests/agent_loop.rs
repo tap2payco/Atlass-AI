@@ -295,6 +295,7 @@ async fn emits_events_in_order() {
             AgentEvent::StepApplied { operation } => format!("step:{operation}"),
             AgentEvent::MessageAppended(m) => format!("msg:{:?}", m.role),
             AgentEvent::ToolStarted { name, .. } => format!("tool:{name}"),
+            AgentEvent::ToolDenied { name, .. } => format!("denied:{name}"),
             AgentEvent::Finished(cause) => format!("finished:{cause:?}"),
         });
     }

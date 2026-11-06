@@ -33,9 +33,11 @@
 //! ```
 
 pub mod agent;
+pub mod approval;
 pub mod conversation;
 pub mod error;
 pub mod events;
+pub mod file_store;
 pub mod machine;
 pub mod operation;
 pub mod ops;
@@ -48,5 +50,7 @@ pub use events::{AgentEvent, EventSink};
 pub use machine::StateMachine;
 pub use operation::{Operation, OperationResult, RunStatus, StepContext, StopCause};
 pub use ops::InferenceSettings;
+pub use file_store::{FileSessionStore, SessionSummary};
 pub use session::{InMemorySessionStore, Session, SessionStore};
+pub use approval::{ApprovalDecision, AutoApprove, ToolApprover};
 pub use tool::{truncate_output, Tool, ToolEffect, ToolLimits};
