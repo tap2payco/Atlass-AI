@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use atlas_cli::agent::CliAgent;
+use atlas_cli::agent::{Access, CliAgent};
 use platform_contracts::health::HealthState;
 use runtime_agent::StopCause;
 use serde_json::json;
@@ -75,7 +75,7 @@ impl sdk::model::ModelRuntime for ReadThenAnswer {
 async fn cli_agent_reads_a_workspace_file_and_answers() {
     let model = Arc::new(ReadThenAnswer::default());
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let agent = CliAgent::with_model(root, 5, model.clone(), "http://localhost:11434".into())
+    let agent = CliAgent::with_model(root, 5, Access::Read, model.clone(), "http://localhost:11434".into())
         .await
         .unwrap();
 

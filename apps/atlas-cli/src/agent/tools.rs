@@ -1,15 +1,15 @@
-//! Read-only workspace tools for the CLI agent.
+//! The workspace boundary and the read-only tools of the CLI agent.
 //!
 //! Every path is resolved inside the workspace root: `..`, absolute paths and
-//! symlinks that point outside the root are rejected. These tools never write,
-//! so they need no approval step (approvals arrive with roadmap step 4).
+//! symlinks that point outside the root are rejected. Write and command tools
+//! live in `write_tools.rs` and `command.rs`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use runtime_agent::Tool;
+use runtime_agent::{Tool, ToolEffect};
 use serde_json::{json, Value};
 use shared::model::ToolSpec;
 
@@ -49,7 +49,7 @@ impl Workspace {
     }
 
     /// Resolve a model-supplied relative path to an existing path inside the root.
-    fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
+    pub(crate) fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
         let candidate = self.root.join(relative);
         let resolved = candidate
             .canonicalize()
@@ -60,15 +60,58 @@ impl Workspace {
         Ok(resolved)
     }
 
-    fn display(&self, path: &Path) -> String {
+    /// Resolve a path the agent wants to create or modify. Stricter than
+    /// `resolve`: `..` is not allowed at all, the path may not exist yet but
+    /// its deepest existing ancestor must resolve (through symlinks) inside
+    /// the root, and nothing under `.git` may be written (a write to
+    /// `.git/hooks` would run code outside the agent's control).
+    pub(crate) fn resolve_for_write(&self, relative: &str) -> Result<PathBuf, String> {
+        if relative.trim().is_empty() {
+            return Err("a path is required".into());
+        }
+        let candidate = self.root.join(relative);
+        if candidate.components().any(|c| matches!(c, Component::ParentDir)) {
+            return Err(format!("'{relative}' may not contain '..'"));
+        }
+
+        // Canonicalize the deepest part that exists, then re-attach the rest.
+        let mut existing = candidate.as_path();
+        let mut missing = Vec::new();
+        while !existing.exists() {
+            let Some(name) = existing.file_name() else {
+                return Err(format!("'{relative}' is outside the workspace"));
+            };
+            missing.push(name.to_owned());
+            existing = existing.parent().ok_or_else(|| format!("'{relative}' is outside the workspace"))?;
+        }
+        let mut resolved = existing
+            .canonicalize()
+            .map_err(|e| format!("cannot resolve '{relative}': {e}"))?;
+        for name in missing.into_iter().rev() {
+            resolved.push(name);
+        }
+
+        let inside = resolved
+            .strip_prefix(&self.root)
+            .map_err(|_| format!("'{relative}' is outside the workspace"))?;
+        if inside.as_os_str().is_empty() {
+            return Err(format!("'{relative}' is the workspace root, not a file"));
+        }
+        if inside.components().any(|c| c.as_os_str().eq_ignore_ascii_case(".git")) {
+            return Err(format!("'{relative}' is inside .git, which the agent may not modify"));
+        }
+        Ok(resolved)
+    }
+
+    pub(crate) fn display(&self, path: &Path) -> String {
         let rel = path.strip_prefix(&self.root).unwrap_or(path);
         let s = rel.to_string_lossy().replace('\\', "/");
         if s.is_empty() { ".".into() } else { s }
     }
 }
 
-/// The CLI agent's tool set.
-pub fn workspace_tools(workspace: &Workspace) -> Vec<Arc<dyn Tool>> {
+/// The read-only tools.
+pub fn read_tools(workspace: &Workspace) -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(ListFiles(workspace.clone())),
         Arc::new(ReadFile(workspace.clone())),
@@ -76,11 +119,11 @@ pub fn workspace_tools(workspace: &Workspace) -> Vec<Arc<dyn Tool>> {
     ]
 }
 
-fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+pub(crate) fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     tokio::task::spawn_blocking(f).await.map_err(|e| format!("tool task failed: {e}"))?
@@ -121,7 +164,7 @@ fn walk(start: &Path, max_depth: u64, visit: &mut dyn FnMut(&Path, bool) -> bool
     go(start, 0, max_depth, visit);
 }
 
-fn looks_binary(bytes: &[u8]) -> bool {
+pub(crate) fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8000).any(|&b| b == 0)
 }
 
@@ -131,6 +174,10 @@ struct ListFiles(Workspace);
 
 #[async_trait]
 impl Tool for ListFiles {
+    fn effect(&self) -> ToolEffect {
+        ToolEffect::ReadOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "list_files".into(),
@@ -185,6 +232,10 @@ struct ReadFile(Workspace);
 
 #[async_trait]
 impl Tool for ReadFile {
+    fn effect(&self) -> ToolEffect {
+        ToolEffect::ReadOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_file".into(),
@@ -241,6 +292,10 @@ struct SearchText(Workspace);
 
 #[async_trait]
 impl Tool for SearchText {
+    fn effect(&self) -> ToolEffect {
+        ToolEffect::ReadOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "search_text".into(),
@@ -306,38 +361,7 @@ impl Tool for SearchText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    /// A unique scratch directory, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new() -> Self {
-            static NEXT: AtomicUsize = AtomicUsize::new(0);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let name = format!(
-                "atlas-cli-tools-{}-{nanos}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            );
-            let path = std::env::temp_dir().join(name);
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::agent::test_support::TempDir;
 
     fn fixture() -> (TempDir, Workspace) {
         let dir = TempDir::new();
@@ -358,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn list_files_respects_depth_and_skips_build_dirs() {
         let (_dir, ws) = fixture();
-        let tools = workspace_tools(&ws);
+        let tools = read_tools(&ws);
         let out = tool(&tools, "list_files").call(json!({})).await.unwrap();
         assert_eq!(out, "blob.bin\nsrc/\nsrc/lib.rs\nsrc/nested/");
         let deep = tool(&tools, "list_files").call(json!({ "path": "src", "max_depth": 3 })).await.unwrap();
@@ -368,7 +392,7 @@ mod tests {
     #[tokio::test]
     async fn read_file_numbers_lines_and_supports_offsets() {
         let (_dir, ws) = fixture();
-        let tools = workspace_tools(&ws);
+        let tools = read_tools(&ws);
         let read = tool(&tools, "read_file");
         assert_eq!(
             read.call(json!({ "path": "src/lib.rs" })).await.unwrap(),
@@ -385,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn search_is_case_insensitive_and_skips_build_output() {
         let (_dir, ws) = fixture();
-        let tools = workspace_tools(&ws);
+        let tools = read_tools(&ws);
         let search = tool(&tools, "search_text");
         assert_eq!(
             search.call(json!({ "query": "ALPHA" })).await.unwrap(),
@@ -399,7 +423,7 @@ mod tests {
     async fn paths_outside_the_workspace_are_rejected() {
         let (dir, ws) = fixture();
         let outside = dir.path().parent().unwrap().to_string_lossy().to_string();
-        let tools = workspace_tools(&ws);
+        let tools = read_tools(&ws);
         let read = tool(&tools, "read_file");
         for path in ["../x", "..", outside.as_str()] {
             let err = tool(&tools, "list_files").call(json!({ "path": path })).await.unwrap_err();

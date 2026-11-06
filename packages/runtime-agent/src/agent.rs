@@ -13,7 +13,7 @@ use crate::machine::StateMachine;
 use crate::operation::{Operation, StopCause};
 use crate::ops::{InferenceOperation, InferenceSettings, MaxTurnsOperation, ToolExecutionOperation};
 use crate::session::{Session, SessionStore};
-use crate::tool::Tool;
+use crate::tool::{Tool, ToolLimits};
 
 pub const DEFAULT_MAX_TURNS: usize = 25;
 
@@ -39,6 +39,7 @@ impl Agent {
             extra_operations: Vec::new(),
             settings: InferenceSettings::default(),
             max_turns: DEFAULT_MAX_TURNS,
+            tool_limits: ToolLimits::default(),
         }
     }
 
@@ -91,9 +92,16 @@ pub struct AgentBuilder {
     extra_operations: Vec<Arc<dyn Operation>>,
     settings: InferenceSettings,
     max_turns: usize,
+    tool_limits: ToolLimits,
 }
 
 impl AgentBuilder {
+    /// Timeout and output cap applied to every tool call.
+    pub fn tool_limits(mut self, limits: ToolLimits) -> Self {
+        self.tool_limits = limits;
+        self
+    }
+
     pub fn tool(mut self, tool: Arc<dyn Tool>) -> Self {
         self.tools.push(tool);
         self
@@ -122,7 +130,7 @@ impl AgentBuilder {
             return Err(AgentError::Config("max_turns must be at least 1".into()));
         }
         let mut operations = self.extra_operations;
-        operations.push(Arc::new(ToolExecutionOperation::new(self.tools)?));
+        operations.push(Arc::new(ToolExecutionOperation::new(self.tools, self.tool_limits)?));
         operations.push(Arc::new(MaxTurnsOperation::new(self.max_turns)));
         operations.push(Arc::new(InferenceOperation::new(self.model, self.settings)));
         Ok(Agent { machine: StateMachine::new(operations, self.store.clone())?, store: self.store })

@@ -49,4 +49,4 @@ pub use machine::StateMachine;
 pub use operation::{Operation, OperationResult, RunStatus, StepContext, StopCause};
 pub use ops::InferenceSettings;
 pub use session::{InMemorySessionStore, Session, SessionStore};
-pub use tool::Tool;
+pub use tool::{truncate_output, Tool, ToolEffect, ToolLimits};

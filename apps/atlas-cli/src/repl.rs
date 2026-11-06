@@ -1,25 +1,38 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use runtime_repository::discovery::{DiscoveryConfig, RepositoryDiscovery};
-use crate::agent::CliAgent;
+use crate::agent::{Access, CliAgent};
 use crate::commands::{boot, status, agent_run, query};
 
 /// The chat agent for the linked project, created on first use and replaced
 /// when another project is linked.
-async fn chat_agent<'a>(slot: &'a mut Option<CliAgent>, project: &Path) -> Result<&'a CliAgent, String> {
+async fn chat_agent<'a>(
+    slot: &'a mut Option<CliAgent>,
+    project: &Path,
+    access: Access,
+) -> Result<&'a CliAgent, String> {
     let stale = slot
         .as_ref()
         .is_none_or(|a| project.canonicalize().ok().as_deref() != Some(a.workspace_root()));
     if stale {
-        *slot = Some(CliAgent::start(project, runtime_agent::DEFAULT_MAX_TURNS).await?);
+        *slot = Some(CliAgent::start(project, runtime_agent::DEFAULT_MAX_TURNS, access).await?);
     }
     Ok(slot.as_ref().expect("agent was just created"))
+}
+
+fn describe_access(access: Access) -> &'static str {
+    match access {
+        Access::Read => "read — the agent can only look at files",
+        Access::Write => "write — the agent can also create and edit files (not .git), without asking",
+        Access::Full => "full — the agent can also edit files and run shell commands, without asking",
+    }
 }
 
 pub async fn run_repl() -> Result<(), String> {
     let mut active_project_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut history: Vec<(String, String)> = Vec::new();
     let mut chat: Option<CliAgent> = None;
+    let mut access = Access::Read;
 
     println!("╭─────────────────────────────────────────────────────────────────────────────╮");
     println!("│ 🤖 Atlas AI Platform — Interactive Terminal Desktop Agent (Claude Code Style)│");
@@ -69,6 +82,7 @@ pub async fn run_repl() -> Result<(), String> {
                 println!("│ <any text>         - Ask the agent (reads files; Ctrl+C stops)│");
                 println!("│ continue           - Let the agent keep going after a stop  │");
                 println!("│ new                - Start a fresh agent conversation       │");
+                println!("│ access <level>     - Agent tools: read | write | full       │");
                 println!("│ run <prompt>       - Run 5-phase agent task on linked project│");
                 println!("│ query <domain> <q> - Query memory or context                    │");
                 println!("│ clear              - Clear terminal output                  │");
@@ -151,6 +165,25 @@ pub async fn run_repl() -> Result<(), String> {
                     println!("╰─────────────────────────────────────────────────────────────╯");
                 }
             }
+            "access" => match parts.get(1) {
+                None => println!("Agent access: {}", describe_access(access)),
+                Some(level) => match level.parse::<Access>() {
+                    Err(e) => println!("{e}"),
+                    Ok(level) => {
+                        let applied = match chat.as_mut() {
+                            Some(agent) => agent.set_access(level),
+                            None => Ok(()),
+                        };
+                        match applied {
+                            Ok(()) => {
+                                access = level;
+                                println!("Agent access: {}", describe_access(access));
+                            }
+                            Err(e) => println!("Agent error: {}", e),
+                        }
+                    }
+                },
+            },
             "new" => match chat.as_mut() {
                 Some(agent) => match agent.reset().await {
                     Ok(()) => println!("Started a new agent conversation."),
@@ -169,7 +202,7 @@ pub async fn run_repl() -> Result<(), String> {
             _ => {
                 // Conversational prompt: one ongoing agent conversation per linked project.
                 let user_prompt = line.to_string();
-                let result = match chat_agent(&mut chat, &active_project_path).await {
+                let result = match chat_agent(&mut chat, &active_project_path, access).await {
                     Ok(agent) => agent.ask(&user_prompt).await,
                     Err(e) => Err(e),
                 };
