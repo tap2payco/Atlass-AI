@@ -16,5 +16,6 @@ members = [
     "packages/runtime-knowledge",
     "packages/runtime-model",
     "packages/runtime-agent",
-    "apps/atlas-conformance"
+    "apps/atlas-conformance",
+    "apps/atlas-cli"
 ]
