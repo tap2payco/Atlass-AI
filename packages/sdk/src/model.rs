@@ -6,8 +6,9 @@ use platform_contracts::health::HealthState;
 
 // Re-export all model types from `shared::model` so callers import only from `sdk::model`.
 pub use shared::model::{
-    CapabilityProfile, CircuitState, ExecutionMetadata, ExecutionPolicy,
-    ModelCapability, ModelRequest, ModelResponse, ModelTier,
+    CapabilityProfile, CircuitState, ContentBlock, ExecutionMetadata, ExecutionPolicy, Message,
+    ModelCapability, ModelRequest, ModelResponse, ModelTier, Role, StopReason, ToolCall,
+    ToolResult, ToolSpec,
 };
 
 /// The public SDK contract for the Model Runtime.
@@ -22,21 +23,11 @@ pub use shared::model::{
 /// # Example
 ///
 /// ```rust,no_run
-/// # async fn example(runtime: &dyn ModelRuntime) {
-/// use sdk::model::{ModelRequest, ModelCapability, CapabilityProfile, ExecutionPolicy};
+/// use sdk::model::{ModelRuntime, ModelRequest, ModelCapability};
 ///
-/// let response = runtime.execute_inference(ModelRequest {
-///     capability:    ModelCapability::Reasoning,
-///     profile:       CapabilityProfile::Balanced,
-///     policy:        ExecutionPolicy::PreferLocal,
-///     prompt:        "Why is the sky blue?".into(),
-///     system_prompt: None,
-///     max_tokens:    512,
-///     temperature:   0.7,
-///     request_id:    "req-001".into(),
-///     trace_id:      "trace-001".into(),
-///     stream:        false,
-/// }).await.unwrap();
+/// # async fn example(runtime: &dyn ModelRuntime) {
+/// let request = ModelRequest::text(ModelCapability::Reasoning, "Why is the sky blue?");
+/// let response = runtime.execute_inference(request).await.unwrap();
 ///
 /// println!("Provider: {} ({})", response.metadata.provider_id, response.metadata.model_id);
 /// # }

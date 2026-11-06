@@ -40,6 +40,7 @@ use crate::events::{
     CircuitOpened, CircuitRecovered, InferenceCompleted, InferenceFailed, InferenceStarted,
     ModelEvent, ProviderFallback, CacheHit,
 };
+use crate::provider::ModelProvider;
 use crate::registry::ProviderRegistry;
 
 pub struct Router {
@@ -66,6 +67,20 @@ impl Router {
         }
     }
 
+    /// Providers that may serve this request, in preference order. A request
+    /// that offers tools only goes to providers that support tool use.
+    fn eligible_providers(&self, request: &ModelRequest) -> Vec<Arc<dyn ModelProvider>> {
+        let mut providers = self.registry.resolve_ordered(
+            &request.capability,
+            &request.profile,
+            &request.policy,
+        );
+        if !request.tools.is_empty() {
+            providers.retain(|p| p.supports_tool_use());
+        }
+        providers
+    }
+
     // ── Public routing surface ────────────────────────────────────────────────
 
     pub async fn route(&self, request: ModelRequest) -> Result<ModelResponse, InferenceError> {
@@ -80,11 +95,7 @@ impl Router {
         }
 
         // 2. Resolve ordered providers
-        let providers = self.registry.resolve_ordered(
-            &request.capability,
-            &request.profile,
-            &request.policy,
-        );
+        let providers = self.eligible_providers(&request);
 
         if providers.is_empty() {
             return Err(InferenceError::AllProvidersFailed);
@@ -194,11 +205,7 @@ impl Router {
         request: ModelRequest,
         tx: mpsc::Sender<String>,
     ) -> Result<ExecutionMetadata, InferenceError> {
-        let providers = self.registry.resolve_ordered(
-            &request.capability,
-            &request.profile,
-            &request.policy,
-        );
+        let providers = self.eligible_providers(&request);
 
         if providers.is_empty() {
             return Err(InferenceError::AllProvidersFailed);

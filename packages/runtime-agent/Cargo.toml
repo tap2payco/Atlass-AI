@@ -1,0 +1,19 @@
+[package]
+name = "runtime-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Atlas Agent Runtime — an operation state machine that runs model/tool turns over a persisted conversation"
+
+[dependencies]
+shared      = { path = "../shared" }
+sdk         = { path = "../sdk" }
+async-trait = "0.1"
+tokio       = { version = "1", features = ["sync", "macros", "rt"] }
+tokio-util  = "0.7"
+serde_json  = "1.0"
+thiserror   = "1.0"
+tracing     = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["sync", "macros", "rt", "rt-multi-thread", "time"] }
+platform-contracts = { path = "../platform-contracts" }

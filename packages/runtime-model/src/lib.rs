@@ -7,25 +7,15 @@
 //!
 //! ```rust,no_run
 //! use runtime_model::{ModelRuntime, ModelRuntimeConfig};
-//! use runtime_model::domain::{ModelCapability, ModelRequest, CapabilityProfile, ExecutionPolicy};
+//! use runtime_model::domain::{ModelCapability, ModelRequest};
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let config = ModelRuntimeConfig::from_env();
 //!     let runtime = ModelRuntime::build(config).await;
 //!
-//!     let response = runtime.execute_inference(ModelRequest {
-//!         capability: ModelCapability::Reasoning,
-//!         profile:    CapabilityProfile::Balanced,
-//!         policy:     ExecutionPolicy::PreferLocal,
-//!         prompt:     "Why is the sky blue?".into(),
-//!         system_prompt: None,
-//!         max_tokens: 512,
-//!         temperature: 0.7,
-//!         request_id: "req-001".into(),
-//!         trace_id:   "trace-001".into(),
-//!         stream: false,
-//!     }).await.unwrap();
+//!     let request = ModelRequest::text(ModelCapability::Reasoning, "Why is the sky blue?");
+//!     let response = runtime.execute_inference(request).await.unwrap();
 //!
 //!     println!("{}", response.content);
 //!     println!("Provider: {} ({})", response.metadata.provider_id, response.metadata.model_id);
@@ -115,10 +105,11 @@ impl ModelRuntime {
         let mut providers: Vec<Arc<dyn ModelProvider>> = Vec::new();
 
         // Always add Ollama (it will report Offline if not running)
-        providers.push(Arc::new(OllamaProvider::new(
+        providers.push(Arc::new(OllamaProvider::with_model_override(
             config.ollama_base_url.clone(),
             local_registry.clone(),
             profile_registry.clone(),
+            config.ollama_model_override.clone(),
         )));
 
         // Add Fireworks only if an API key is present
@@ -185,5 +176,29 @@ impl ModelRuntime {
         // Return Healthy as a composite signal — individual provider health
         // is reflected in circuit breaker states surfaced via telemetry events.
         HealthState::Healthy
+    }
+}
+
+/// Lets cognitive runtimes (e.g. `runtime-agent`) depend on the SDK trait
+/// rather than on this crate.
+#[async_trait::async_trait]
+impl sdk::model::ModelRuntime for ModelRuntime {
+    async fn execute_inference(
+        &self,
+        request: ModelRequest,
+    ) -> Result<ModelResponse, InferenceError> {
+        ModelRuntime::execute_inference(self, request).await
+    }
+
+    async fn execute_stream(
+        &self,
+        request: ModelRequest,
+        tx: mpsc::Sender<String>,
+    ) -> Result<ExecutionMetadata, InferenceError> {
+        ModelRuntime::execute_stream(self, request, tx).await
+    }
+
+    async fn health_check(&self) -> HealthState {
+        ModelRuntime::health_check(self).await
     }
 }

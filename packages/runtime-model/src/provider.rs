@@ -6,23 +6,22 @@
 ///
 /// ## Capability gating
 ///
-/// Before calling `infer`, `stream`, `tool_call`, or `embeddings`, the router
-/// checks `supported_capabilities()`. If the desired capability is not
-/// advertised, it skips this provider entirely — no runtime panics.
+/// Before calling `infer`, `stream`, or `embeddings`, the router checks
+/// `supported_capabilities()`. If the desired capability is not advertised,
+/// it skips this provider entirely — no runtime panics. A request carrying
+/// tools is additionally only sent to providers whose `supports_tool_use()`
+/// is true (ADR-017).
 ///
 /// ## Optional methods
 ///
-/// `tool_call` and `embeddings` return `Err(InferenceError::Unsupported(...))`
-/// by default. Providers that support them override these methods.
+/// `embeddings` returns `Err(InferenceError::Unsupported(...))` by default.
+/// Providers that support it override the method.
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use platform_contracts::health::HealthState;
 use shared::error::InferenceError;
 
-use crate::domain::{
-    ExecutionMetadata, ModelCapability, ModelRequest, ModelResponse,
-    ModelTier, ToolCallResponse, ToolDefinition,
-};
+use crate::domain::{ExecutionMetadata, ModelCapability, ModelRequest, ModelResponse, ModelTier};
 
 #[async_trait]
 pub trait ModelProvider: Send + Sync {
@@ -70,20 +69,12 @@ pub trait ModelProvider: Send + Sync {
         )))
     }
 
-    /// Structured tool/function calling.
+    /// Whether `infer` honours `ModelRequest::tools` and returns tool calls.
     ///
-    /// Defaults to `Err(InferenceError::Unsupported)`. Only overridden by
-    /// providers that advertise `ModelCapability::ToolCalling`.
-    async fn tool_call(
-        &self,
-        request: &ModelRequest,
-        tools: &[ToolDefinition],
-    ) -> Result<ToolCallResponse, InferenceError> {
-        let _ = (request, tools);
-        Err(InferenceError::Unsupported(format!(
-            "Provider '{}' does not support tool calling",
-            self.provider_id()
-        )))
+    /// Defaults to `false`; the router never sends a request with tools to a
+    /// provider that returns `false`.
+    fn supports_tool_use(&self) -> bool {
+        false
     }
 
     // ── Health ───────────────────────────────────────────────────────────────

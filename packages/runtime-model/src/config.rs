@@ -8,6 +8,7 @@
 /// | Variable | Default | Description |
 /// |---|---|---|
 /// | `ATLAS_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
+/// | `ATLAS_OLLAMA_MODEL` | _(none)_ | Use this Ollama model for every non-embedding request, instead of the per-profile model lists |
 /// | `ATLAS_FIREWORKS_API_KEY` | _(none)_ | Enables Fireworks provider |
 /// | `ATLAS_MODEL_PRIVACY_MODE` | `false` | Block all external providers |
 /// | `ATLAS_MODEL_CACHE_MAX` | `256` | Max cached responses |
@@ -22,6 +23,10 @@ use crate::circuit_breaker::CircuitBreakerConfig;
 pub struct ModelRuntimeConfig {
     /// Base URL for the local Ollama instance.
     pub ollama_base_url: String,
+
+    /// When set, Ollama serves every non-embedding capability with this model
+    /// instead of resolving one from the profile lists.
+    pub ollama_model_override: Option<String>,
 
     /// API key for Fireworks AI. If `None`, the Fireworks provider is not registered.
     pub fireworks_api_key: Option<String>,
@@ -48,6 +53,7 @@ impl Default for ModelRuntimeConfig {
     fn default() -> Self {
         Self {
             ollama_base_url: "http://localhost:11434".into(),
+            ollama_model_override: None,
             fireworks_api_key: None,
             privacy_mode: false,
             cache_max_entries: 256,
@@ -68,6 +74,12 @@ impl ModelRuntimeConfig {
 
         if let Ok(url) = std::env::var("ATLAS_OLLAMA_URL") {
             config.ollama_base_url = url;
+        }
+        if let Ok(model) = std::env::var("ATLAS_OLLAMA_MODEL") {
+            let model = model.trim().to_string();
+            if !model.is_empty() {
+                config.ollama_model_override = Some(model);
+            }
         }
         if let Ok(key) = std::env::var("ATLAS_FIREWORKS_API_KEY") {
             config.fireworks_api_key = Some(key);

@@ -6,9 +6,10 @@
 ///
 /// ## Cache key
 ///
-/// Hashed fields: `capability`, `profile`, `prompt`, `system_prompt`,
+/// Hashed fields: `capability`, `profile`, `messages`, `system_prompt`,
 /// `max_tokens`, `temperature`. Non-deterministic fields (`request_id`,
-/// `trace_id`, `stream`) are excluded from the key.
+/// `trace_id`, `stream`) are excluded from the key. Requests that offer
+/// `tools` are never cached.
 ///
 /// ## Eviction
 ///
@@ -59,7 +60,7 @@ impl InferenceCache {
     ///
     /// Returns `None` on miss or if the entry has expired.
     pub fn get(&self, request: &ModelRequest) -> Option<ModelResponse> {
-        if self.max_entries == 0 {
+        if self.max_entries == 0 || !is_cacheable(request) {
             return None;
         }
         let key = compute_key(request);
@@ -78,7 +79,7 @@ impl InferenceCache {
     ///
     /// If the cache is at capacity, the oldest entry is evicted first.
     pub fn insert(&self, request: &ModelRequest, response: ModelResponse) {
-        if self.max_entries == 0 {
+        if self.max_entries == 0 || !is_cacheable(request) {
             return;
         }
         let key = compute_key(request);
@@ -121,16 +122,24 @@ impl InferenceCache {
 
 // ── Key computation ───────────────────────────────────────────────────────────
 
+/// Requests that offer tools are never cached (ADR-017): a tool loop depends
+/// on external state, so replaying an earlier answer would be wrong.
+fn is_cacheable(request: &ModelRequest) -> bool {
+    request.tools.is_empty()
+}
+
 fn compute_key(request: &ModelRequest) -> u64 {
     // Concatenate deterministic fields into a byte buffer, then hash.
+    // Messages are serialized as JSON, which is unambiguous and order-preserving.
+    let messages = serde_json::to_string(&request.messages).unwrap_or_default();
     let mut buf = String::with_capacity(
-        request.prompt.len() + request.system_prompt.as_deref().unwrap_or("").len() + 64,
+        messages.len() + request.system_prompt.as_deref().unwrap_or("").len() + 64,
     );
     buf.push_str(&format!("{:?}", request.capability));
     buf.push(':');
     buf.push_str(&format!("{:?}", request.profile));
     buf.push(':');
-    buf.push_str(&request.prompt);
+    buf.push_str(&messages);
     buf.push(':');
     buf.push_str(request.system_prompt.as_deref().unwrap_or(""));
     buf.push(':');
@@ -147,28 +156,23 @@ fn compute_key(request: &ModelRequest) -> u64 {
 mod tests {
     use super::*;
     use crate::domain::{
-        CapabilityProfile, CircuitState, ExecutionMetadata, ExecutionPolicy,
-        ModelCapability, ModelResponse, ModelTier,
+        CircuitState, ExecutionMetadata, Message, ModelCapability, ModelResponse, ModelTier,
+        StopReason, ToolSpec,
     };
 
     fn make_request(prompt: &str) -> ModelRequest {
-        ModelRequest {
-            capability: ModelCapability::Reasoning,
-            profile: CapabilityProfile::Balanced,
-            policy: ExecutionPolicy::PreferLocal,
-            prompt: prompt.to_string(),
-            system_prompt: None,
-            max_tokens: 512,
-            temperature: 0.7,
-            request_id: "test-req".into(),
-            trace_id: "test-trace".into(),
-            stream: false,
-        }
+        let mut req = ModelRequest::text(ModelCapability::Reasoning, prompt);
+        req.max_tokens = 512;
+        req.request_id = "test-req".into();
+        req.trace_id = "test-trace".into();
+        req
     }
 
     fn make_response(req: &ModelRequest) -> ModelResponse {
         ModelResponse {
             content: "test response".into(),
+            tool_calls: Vec::new(),
+            stop_reason: StopReason::EndTurn,
             capability: req.capability.clone(),
             metadata: ExecutionMetadata {
                 provider_id: "ollama".into(),
@@ -210,6 +214,30 @@ mod tests {
         let req2 = make_request("world");
         cache.insert(&req1, make_response(&req1));
         assert!(cache.get(&req2).is_none());
+    }
+
+    #[test]
+    fn different_histories_have_different_keys() {
+        let cache = InferenceCache::new(100, 60);
+        let short = make_request("hello");
+        let mut long = make_request("hello");
+        long.messages.push(Message::assistant("hi"));
+        long.messages.push(Message::user("hello"));
+        cache.insert(&short, make_response(&short));
+        assert!(cache.get(&long).is_none());
+    }
+
+    #[test]
+    fn requests_with_tools_are_never_cached() {
+        let cache = InferenceCache::new(100, 60);
+        let req = make_request("list files").with_tools(vec![ToolSpec {
+            name: "ls".into(),
+            description: "List files".into(),
+            input_schema: serde_json::json!({ "type": "object" }),
+        }]);
+        cache.insert(&req, make_response(&req));
+        assert!(cache.get(&req).is_none());
+        assert!(cache.is_empty());
     }
 
     #[test]

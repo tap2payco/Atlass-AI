@@ -29,9 +29,11 @@ use shared::error::InferenceError;
 
 use crate::domain::{
     CircuitState, ExecutionMetadata, ModelCapability, ModelRequest, ModelResponse, ModelTier,
+    StopReason, ToolCall, ToolSpec,
 };
 use crate::profile::ProfileRegistry;
 use crate::provider::ModelProvider;
+use crate::providers::wire::{self, ChatTurn};
 
 // ── Fireworks API shapes (OpenAI-compatible) ──────────────────────────────────
 
@@ -41,6 +43,8 @@ const FIREWORKS_BASE_URL: &str = "https://api.fireworks.ai/inference/v1";
 struct FwChatRequest {
     model: String,
     messages: Vec<FwMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<FwTool>,
     max_tokens: u32,
     temperature: f32,
     stream: bool,
@@ -48,8 +52,47 @@ struct FwChatRequest {
 
 #[derive(Debug, Serialize)]
 struct FwMessage {
-    role: String,
-    content: String,
+    role: &'static str,
+    /// OpenAI allows `null` content on an assistant turn that only calls tools.
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<FwToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FwTool {
+    r#type: &'static str,
+    function: FwFunctionSpec,
+}
+
+#[derive(Debug, Serialize)]
+struct FwFunctionSpec {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FwToolCall {
+    #[serde(default)]
+    id: String,
+    #[serde(default = "function_type")]
+    r#type: String,
+    function: FwFunctionCall,
+}
+
+fn function_type() -> String {
+    "function".into()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FwFunctionCall {
+    name: String,
+    /// A JSON-encoded string in the OpenAI format.
+    #[serde(default)]
+    arguments: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,11 +104,15 @@ struct FwChatResponse {
 #[derive(Debug, Deserialize)]
 struct FwChoice {
     message: FwChoiceMessage,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FwChoiceMessage {
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<FwToolCall>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,18 +163,74 @@ impl FireworksProvider {
     }
 
     fn build_messages(request: &ModelRequest) -> Vec<FwMessage> {
-        let mut messages = Vec::new();
-        if let Some(ref sys) = request.system_prompt {
-            messages.push(FwMessage {
-                role: "system".into(),
-                content: sys.clone(),
-            });
+        wire::to_chat_turns(request)
+            .into_iter()
+            .map(|turn| match turn {
+                ChatTurn::System(content) => FwMessage::plain("system", Some(content)),
+                ChatTurn::User(content) => FwMessage::plain("user", Some(content)),
+                ChatTurn::Assistant { text, tool_calls } => FwMessage {
+                    tool_calls: tool_calls
+                        .into_iter()
+                        .map(|c| FwToolCall {
+                            id: c.id,
+                            r#type: function_type(),
+                            function: FwFunctionCall {
+                                name: c.name,
+                                arguments: serde_json::Value::String(c.arguments.to_string()),
+                            },
+                        })
+                        .collect(),
+                    ..FwMessage::plain("assistant", (!text.is_empty()).then_some(text))
+                },
+                ChatTurn::Tool { call_id, content, .. } => FwMessage {
+                    tool_call_id: Some(call_id),
+                    ..FwMessage::plain("tool", Some(content))
+                },
+            })
+            .collect()
+    }
+
+    fn build_tools(tools: &[ToolSpec]) -> Vec<FwTool> {
+        tools
+            .iter()
+            .map(|t| FwTool {
+                r#type: "function",
+                function: FwFunctionSpec {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    parameters: t.input_schema.clone(),
+                },
+            })
+            .collect()
+    }
+
+    fn parse_tool_calls(calls: Vec<FwToolCall>) -> Vec<ToolCall> {
+        calls
+            .into_iter()
+            .map(|c| ToolCall {
+                id: if c.id.is_empty() { wire::generated_call_id() } else { c.id },
+                name: c.function.name,
+                arguments: wire::parse_arguments(c.function.arguments),
+            })
+            .collect()
+    }
+
+    fn stop_reason(finish_reason: Option<&str>, has_tool_calls: bool) -> StopReason {
+        if has_tool_calls {
+            return StopReason::ToolUse;
         }
-        messages.push(FwMessage {
-            role: "user".into(),
-            content: request.prompt.clone(),
-        });
-        messages
+        match finish_reason {
+            None | Some("stop") => StopReason::EndTurn,
+            Some("length") => StopReason::MaxTokens,
+            Some("tool_calls") => StopReason::ToolUse,
+            Some(_) => StopReason::Other,
+        }
+    }
+}
+
+impl FwMessage {
+    fn plain(role: &'static str, content: Option<String>) -> Self {
+        Self { role, content, tool_calls: Vec::new(), tool_call_id: None }
     }
 }
 
@@ -145,6 +248,10 @@ impl ModelProvider for FireworksProvider {
         &self.capabilities
     }
 
+    fn supports_tool_use(&self) -> bool {
+        true
+    }
+
     async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse, InferenceError> {
         let model = self.resolve_model(request).ok_or_else(|| {
             InferenceError::Unsupported(format!(
@@ -156,6 +263,7 @@ impl ModelProvider for FireworksProvider {
         let body = FwChatRequest {
             model: model.clone(),
             messages: Self::build_messages(request),
+            tools: Self::build_tools(&request.tools),
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             stream: false,
@@ -184,22 +292,28 @@ impl ModelProvider for FireworksProvider {
             message: e.to_string(),
         })?;
 
-        let content = parsed
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default();
+        let tokens_used = parsed.usage.map(|u| u.completion_tokens).unwrap_or(0);
+        let (content, tool_calls, finish_reason) = match parsed.choices.into_iter().next() {
+            Some(choice) => (
+                choice.message.content.unwrap_or_default(),
+                Self::parse_tool_calls(choice.message.tool_calls),
+                choice.finish_reason,
+            ),
+            None => (String::new(), Vec::new(), None),
+        };
+        let stop_reason = Self::stop_reason(finish_reason.as_deref(), !tool_calls.is_empty());
 
         Ok(ModelResponse {
             content,
+            tool_calls,
+            stop_reason,
             capability: request.capability.clone(),
             metadata: ExecutionMetadata {
                 provider_id: "fireworks".into(),
                 model_id: model,
                 tier: ModelTier::External,
                 latency_ms: 0, // filled by Router
-                tokens_used: parsed.usage.map(|u| u.completion_tokens).unwrap_or(0),
+                tokens_used,
                 cache_hit: false,
                 fallback_used: false,
                 retry_count: 0,
@@ -221,9 +335,11 @@ impl ModelProvider for FireworksProvider {
             ))
         })?;
 
+        // Streaming is text-only (ADR-017); tools are not offered here.
         let body = FwChatRequest {
             model: model.clone(),
             messages: Self::build_messages(request),
+            tools: Vec::new(),
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             stream: true,
@@ -310,5 +426,67 @@ impl ModelProvider for FireworksProvider {
                 HealthState::Offline
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{ContentBlock, Message, Role, ToolResult};
+    use serde_json::json;
+
+    #[test]
+    fn request_json_matches_openai_tool_shape() {
+        let assistant = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolCall(ToolCall {
+                id: "call_9".into(),
+                name: "read_file".into(),
+                arguments: json!({ "path": "a.rs" }),
+            })],
+        };
+        let req = ModelRequest::conversation(
+            ModelCapability::CodeGeneration,
+            vec![
+                Message::user("Open a.rs"),
+                assistant,
+                Message::tool_results([ToolResult {
+                    call_id: "call_9".into(),
+                    content: "fn main() {}".into(),
+                    is_error: false,
+                }]),
+            ],
+        );
+        let messages = serde_json::to_value(FireworksProvider::build_messages(&req)).unwrap();
+        assert_eq!(
+            messages,
+            json!([
+                { "role": "user", "content": "Open a.rs" },
+                { "role": "assistant", "content": null,
+                  "tool_calls": [{ "id": "call_9", "type": "function",
+                                   "function": { "name": "read_file", "arguments": "{\"path\":\"a.rs\"}" } }] },
+                { "role": "tool", "content": "fn main() {}", "tool_call_id": "call_9" }
+            ])
+        );
+    }
+
+    #[test]
+    fn response_parses_string_arguments_and_keeps_ids() {
+        let parsed: FwChatResponse = serde_json::from_value(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": null,
+                             "tool_calls": [{ "id": "call_1", "type": "function",
+                                              "function": { "name": "ls", "arguments": "{\"dir\":\".\"}" } }] },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": { "completion_tokens": 5 }
+        }))
+        .unwrap();
+        let choice = parsed.choices.into_iter().next().unwrap();
+        assert!(choice.message.content.is_none());
+        let calls = FireworksProvider::parse_tool_calls(choice.message.tool_calls);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].arguments, json!({ "dir": "." }));
+        assert_eq!(FireworksProvider::stop_reason(Some("tool_calls"), false), StopReason::ToolUse);
     }
 }
