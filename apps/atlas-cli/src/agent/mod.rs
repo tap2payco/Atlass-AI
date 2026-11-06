@@ -3,6 +3,7 @@
 
 pub mod approval;
 pub mod command;
+pub mod policy;
 pub mod process;
 pub mod tools;
 pub mod write_tools;
@@ -71,11 +72,13 @@ impl fmt::Display for Access {
 }
 
 fn tools_for(access: Access, workspace: &Workspace) -> Vec<Arc<dyn Tool>> {
+    // Tools enforce this access level's sandbox policy (see `policy.rs`).
+    let workspace = &workspace.with_sandbox(access.sandbox_policy());
     let mut tools = read_tools(workspace);
-    if access >= Access::Write {
+    if workspace.sandbox().allows_writes() {
         tools.extend(write_tools(workspace));
     }
-    if access >= Access::Full {
+    if access.allows_commands() {
         tools.push(Arc::new(RunCommand::new(workspace)));
     }
     tools

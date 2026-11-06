@@ -23,10 +23,16 @@ runtime-repository = { path = "../../packages/runtime-repository" }
 execution-core = { path = "../../packages/execution-core" }
 sdk = { path = "../../packages/sdk" }
 
-# Job Objects: kill a command's whole process tree (run_command).
+# Job Objects and restricted tokens for run_command.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
 ] }
+
+# Process groups: kill a command's whole process group (run_command).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

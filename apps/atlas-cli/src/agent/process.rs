@@ -1,17 +1,25 @@
 //! Process containment for `run_command`.
 //!
-//! - `ProcessTree` (Windows): a Job Object created with kill-on-close. The
-//!   command's shell is assigned to it, so everything the shell starts is in
-//!   the job too, and dropping the guard (timeout, cancel, or the command
-//!   finishing) ends all of them. Background processes a command starts do
-//!   not outlive it. A process started in the instant between spawn and
-//!   assignment can escape; Codex avoids that by spawning suspended.
-//!   On other platforms the guard does nothing yet: only the shell is killed.
-//! - `scrub_secrets`: removes environment variables whose names look like
-//!   credentials, so a command (or a prompt-injected one) cannot read them.
+//! - `ProcessTree`: dropping it (timeout, cancel, or the command finishing)
+//!   ends every process the command started, so background processes do not
+//!   outlive it.
+//!   - Windows: a Job Object created with kill-on-close; the shell is
+//!     assigned to it, so everything the shell starts is in the job too. A
+//!     process started in the instant between spawn and assignment can
+//!     escape; the `restricted` path avoids that by spawning suspended.
+//!   - Unix: the shell is started as the leader of its own process group
+//!     (`process_group(0)`), and the guard sends SIGKILL to the group.
+//! - `restricted` (Windows): spawn with a restricted token, suspended, in a
+//!   kill-on-close job. `policy.rs` says what that does and does not stop.
+//! - `scrub_secrets` / `command_env`: remove environment variables whose
+//!   names look like credentials, so a command (or a prompt-injected one)
+//!   cannot read them.
+
+#[cfg(windows)]
+pub mod restricted;
 
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 
 use tokio::process::{Child, Command};
 
@@ -31,19 +39,27 @@ pub fn is_secret_name(name: &str) -> bool {
         .any(|part| SECRET_PARTS.iter().any(|s| part.eq_ignore_ascii_case(s)))
 }
 
-/// Remove secret-looking variables from `command`'s environment and return
-/// the names removed (never the values).
-pub fn scrub_secrets(command: &mut Command) -> Vec<String> {
-    let keep: HashSet<String> = std::env::var(KEEP_ENV_VAR)
+fn kept_names() -> HashSet<String> {
+    std::env::var(KEEP_ENV_VAR)
         .unwrap_or_default()
         .split(',')
         .map(|s| s.trim().to_ascii_uppercase())
         .filter(|s| !s.is_empty())
-        .collect();
+        .collect()
+}
+
+fn should_scrub(name: &str, keep: &HashSet<String>) -> bool {
+    is_secret_name(name) && !keep.contains(&name.to_ascii_uppercase())
+}
+
+/// Remove secret-looking variables from `command`'s environment and return
+/// the names removed (never the values).
+pub fn scrub_secrets(command: &mut Command) -> Vec<String> {
+    let keep = kept_names();
     let mut removed = Vec::new();
     for (name, _) in std::env::vars_os() {
         let Some(text) = name.to_str() else { continue };
-        if is_secret_name(text) && !keep.contains(&text.to_ascii_uppercase()) {
+        if should_scrub(text, &keep) {
             command.env_remove(OsStr::new(text));
             removed.push(text.to_string());
         }
@@ -52,14 +68,39 @@ pub fn scrub_secrets(command: &mut Command) -> Vec<String> {
     removed
 }
 
-/// Kills the child's whole process tree when dropped (Windows).
+/// This process's environment without secret-looking variables, plus
+/// `extra` (which replaces inherited values of the same name). Returns the
+/// variables and the names removed (never the values).
+pub fn command_env(extra: &[(&str, &str)]) -> (Vec<(OsString, OsString)>, Vec<String>) {
+    let keep = kept_names();
+    let mut removed = Vec::new();
+    let mut vars: Vec<(OsString, OsString)> = Vec::new();
+    for (name, value) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if name.to_str().is_some_and(|t| should_scrub(t, &keep)) {
+            removed.push(text.into_owned());
+        } else if !extra.iter().any(|(k, _)| text.eq_ignore_ascii_case(k)) {
+            vars.push((name, value));
+        }
+    }
+    vars.extend(extra.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))));
+    removed.sort();
+    (vars, removed)
+}
+
+/// Kills the child's whole process tree when dropped.
 pub struct ProcessTree {
     #[cfg(windows)]
     job: Option<windows::Job>,
+    /// The child's process group (its pid), when it was spawned as a group leader.
+    #[cfg(unix)]
+    group: Option<i32>,
 }
 
 impl ProcessTree {
-    /// Put `child` (just spawned) and its future descendants in a kill-on-close job.
+    /// Contain `child` (just spawned) and its future descendants: on Windows
+    /// by putting it in a kill-on-close job; on Unix the child must have been
+    /// spawned with `process_group(0)`, and its group is killed on drop.
     pub fn contain(child: &Child) -> Self {
         #[cfg(windows)]
         {
@@ -72,7 +113,11 @@ impl ProcessTree {
             }
             Self { job }
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
+        {
+            Self { group: child.id().and_then(|id| i32::try_from(id).ok()).filter(|id| *id > 0) }
+        }
+        #[cfg(not(any(windows, unix)))]
         {
             let _ = child;
             Self {}
@@ -84,9 +129,25 @@ impl ProcessTree {
         {
             self.job.is_some()
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
+        {
+            self.group.is_some()
+        }
+        #[cfg(not(any(windows, unix)))]
         {
             false
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        if let Some(group) = self.group {
+            // SAFETY: killpg only sends a signal; ESRCH (the group is already gone) is fine.
+            unsafe {
+                libc::killpg(group, libc::SIGKILL);
+            }
         }
     }
 }
@@ -131,7 +192,7 @@ mod windows {
         }
 
         pub fn assign(&self, process: RawHandle) -> bool {
-            // SAFETY: `process` is a live process handle owned by tokio's Child.
+            // SAFETY: `process` is a live process handle owned by the caller.
             unsafe { AssignProcessToJobObject(self.0, process as HANDLE) != 0 }
         }
     }
@@ -150,6 +211,18 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_env_drops_secrets_and_adds_extras() {
+        let name = format!("ATLAS_ENV_TEST_{}_SECRET", std::process::id());
+        std::env::set_var(&name, "hidden");
+        let (vars, removed) = command_env(&[("ATLAS_SANDBOX_NETWORK", "0")]);
+        std::env::remove_var(&name);
+        assert!(removed.contains(&name));
+        assert!(!vars.iter().any(|(k, _)| k.to_string_lossy() == name));
+        let network: Vec<_> = vars.iter().filter(|(k, _)| k == "ATLAS_SANDBOX_NETWORK").map(|(_, v)| v).collect();
+        assert_eq!(network, [&OsString::from("0")]);
+    }
 
     #[test]
     fn recognises_secret_names_without_false_positives() {
