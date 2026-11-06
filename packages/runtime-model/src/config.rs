@@ -10,6 +10,7 @@
 /// | `ATLAS_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 /// | `ATLAS_OLLAMA_MODEL` | _(none)_ | Use this Ollama model for every non-embedding request, instead of the per-profile model lists |
 /// | `ATLAS_OLLAMA_NUM_CTX` | `8192` | Context window requested from Ollama (`0` = Ollama's own default) |
+/// | `ATLAS_OLLAMA_TOOL_MODE` | `auto` | How tools reach Ollama models: `native` (Ollama's `tools` field only), `emulated` (tools described in the system prompt and JSON calls parsed from the reply, for models without tool support) or `auto` (native, switching a model to emulation the first time Ollama says it does not support tools) |
 /// | `ATLAS_FIREWORKS_API_KEY` | _(none)_ | Enables Fireworks provider |
 /// | `ATLAS_MODEL_PRIVACY_MODE` | `false` | Block all external providers |
 /// | `ATLAS_MODEL_CACHE_MAX` | `256` | Max cached responses |
@@ -22,6 +23,32 @@ use crate::circuit_breaker::CircuitBreakerConfig;
 
 /// Context window requested from Ollama unless `ATLAS_OLLAMA_NUM_CTX` says otherwise.
 pub const DEFAULT_OLLAMA_NUM_CTX: u32 = 8_192;
+
+/// How Ollama serves requests that carry tools (`ATLAS_OLLAMA_TOOL_MODE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OllamaToolMode {
+    /// Always send tools in Ollama's `tools` field.
+    Native,
+    /// Always describe tools in the system prompt and parse JSON calls from
+    /// the reply (Goose-style emulation).
+    Emulated,
+    /// Native first; a model Ollama rejects with "does not support tools" is
+    /// retried, and from then on served, in emulation.
+    #[default]
+    Auto,
+}
+
+impl OllamaToolMode {
+    /// Parse `native`, `emulated` (or `emulate`) or `auto`, ignoring case.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "native" => Some(Self::Native),
+            "emulated" | "emulate" | "emulation" => Some(Self::Emulated),
+            "auto" | "" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ModelRuntimeConfig {
@@ -36,6 +63,9 @@ pub struct ModelRuntimeConfig {
     /// `None` leaves Ollama's own default (often 2–4k), which silently drops
     /// the start of longer conversations.
     pub ollama_num_ctx: Option<u32>,
+
+    /// Native tools, emulated tools, or native with automatic fallback.
+    pub ollama_tool_mode: OllamaToolMode,
 
     /// API key for Fireworks AI. If `None`, the Fireworks provider is not registered.
     pub fireworks_api_key: Option<String>,
@@ -64,6 +94,7 @@ impl Default for ModelRuntimeConfig {
             ollama_base_url: "http://localhost:11434".into(),
             ollama_model_override: None,
             ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
+            ollama_tool_mode: OllamaToolMode::Auto,
             fireworks_api_key: None,
             privacy_mode: false,
             cache_max_entries: 256,
@@ -96,6 +127,15 @@ impl ModelRuntimeConfig {
                 config.ollama_num_ctx = (n > 0).then_some(n);
             }
         }
+        if let Ok(val) = std::env::var("ATLAS_OLLAMA_TOOL_MODE") {
+            match OllamaToolMode::parse(&val) {
+                Some(mode) => config.ollama_tool_mode = mode,
+                None => tracing::warn!(
+                    value = %val,
+                    "ATLAS_OLLAMA_TOOL_MODE must be native, emulated or auto; using auto"
+                ),
+            }
+        }
         if let Ok(key) = std::env::var("ATLAS_FIREWORKS_API_KEY") {
             config.fireworks_api_key = Some(key);
         }
@@ -124,5 +164,19 @@ impl ModelRuntimeConfig {
         }
 
         config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_mode_parses_and_defaults_to_auto() {
+        assert_eq!(OllamaToolMode::parse("native"), Some(OllamaToolMode::Native));
+        assert_eq!(OllamaToolMode::parse(" Emulated "), Some(OllamaToolMode::Emulated));
+        assert_eq!(OllamaToolMode::parse("AUTO"), Some(OllamaToolMode::Auto));
+        assert_eq!(OllamaToolMode::parse("sometimes"), None);
+        assert_eq!(ModelRuntimeConfig::default().ollama_tool_mode, OllamaToolMode::Auto);
     }
 }

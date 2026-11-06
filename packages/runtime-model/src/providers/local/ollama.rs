@@ -14,14 +14,27 @@
 /// - Inference: `POST /api/chat`   (OpenAI-compatible messages format)
 /// - Streaming: `POST /api/chat`   (with `stream: true`)
 /// - Embeddings: `POST /api/embeddings`
+///
+/// ## Tools
+///
+/// Tools go in `/api/chat`'s `tools` field when the model supports them. For
+/// a model that does not, the request is emulated (`providers::tool_emulation`):
+/// tools are described in the system prompt and JSON calls are parsed from the
+/// reply. `ATLAS_OLLAMA_TOOL_MODE` picks `native`, `emulated` or `auto`; in
+/// `auto` a model Ollama rejects with "does not support tools" is retried once
+/// in emulation and remembered, so later requests go straight to emulation.
+use std::collections::HashSet;
+use std::sync::Mutex;
+
 use async_trait::async_trait;
 use platform_contracts::health::HealthState;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 use shared::error::InferenceError;
 
+use crate::config::OllamaToolMode;
 use crate::domain::{
     CircuitState, ExecutionMetadata, ModelCapability, ModelRequest, ModelResponse, ModelTier,
     StopReason, ToolCall, ToolSpec,
@@ -29,6 +42,7 @@ use crate::domain::{
 use crate::local_model_registry::LocalModelRegistry;
 use crate::profile::ProfileRegistry;
 use crate::provider::ModelProvider;
+use crate::providers::tool_emulation;
 use crate::providers::wire::{self, ChatTurn};
 
 // ── Ollama request/response shapes ────────────────────────────────────────────
@@ -128,6 +142,10 @@ pub struct OllamaProvider {
     model_override: Option<String>,
     /// `ATLAS_OLLAMA_NUM_CTX`: context window sent with every chat request.
     num_ctx: Option<u32>,
+    /// `ATLAS_OLLAMA_TOOL_MODE`.
+    tool_mode: OllamaToolMode,
+    /// Models found (in `auto` mode) to have no native tool support.
+    emulated_models: Mutex<HashSet<String>>,
 }
 
 /// Capabilities an explicitly chosen chat model is asked to serve.
@@ -179,6 +197,8 @@ impl OllamaProvider {
             capabilities: caps,
             model_override,
             num_ctx: None,
+            tool_mode: OllamaToolMode::default(),
+            emulated_models: Mutex::new(HashSet::new()),
         }
     }
 
@@ -186,6 +206,25 @@ impl OllamaProvider {
     pub fn with_num_ctx(mut self, num_ctx: Option<u32>) -> Self {
         self.num_ctx = num_ctx;
         self
+    }
+
+    /// Choose native tools, emulated tools, or native with fallback.
+    pub fn with_tool_mode(mut self, tool_mode: OllamaToolMode) -> Self {
+        self.tool_mode = tool_mode;
+        self
+    }
+
+    /// Whether a tool request for `model` should be emulated from the start.
+    fn emulates(&self, model: &str) -> bool {
+        match self.tool_mode {
+            OllamaToolMode::Native => false,
+            OllamaToolMode::Emulated => true,
+            OllamaToolMode::Auto => self
+                .emulated_models
+                .lock()
+                .map(|set| set.contains(model))
+                .unwrap_or(false),
+        }
     }
 
     fn options(&self, request: &ModelRequest) -> OllamaOptions {
@@ -221,7 +260,11 @@ impl OllamaProvider {
     }
 
     fn build_messages(request: &ModelRequest) -> Vec<OllamaMessage> {
-        wire::to_chat_turns(request)
+        Self::turns_to_messages(wire::to_chat_turns(request))
+    }
+
+    fn turns_to_messages(turns: Vec<ChatTurn>) -> Vec<OllamaMessage> {
+        turns
             .into_iter()
             .map(|turn| match turn {
                 ChatTurn::System(content) => OllamaMessage::plain("system", content),
@@ -269,56 +312,22 @@ impl OllamaProvider {
             .collect()
     }
 
-    fn stop_reason(done_reason: Option<&str>, has_tool_calls: bool) -> StopReason {
-        if has_tool_calls {
-            return StopReason::ToolUse;
-        }
-        match done_reason {
-            None | Some("stop") => StopReason::EndTurn,
-            Some("length") => StopReason::MaxTokens,
-            Some(_) => StopReason::Other,
-        }
-    }
-}
-
-impl OllamaMessage {
-    fn plain(role: &'static str, content: String) -> Self {
-        Self { role, content, tool_calls: Vec::new(), tool_name: None }
-    }
-}
-
-#[async_trait]
-impl ModelProvider for OllamaProvider {
-    fn provider_id(&self) -> &str {
-        "ollama"
-    }
-
-    fn tier(&self) -> ModelTier {
-        ModelTier::Local
-    }
-
-    fn supported_capabilities(&self) -> &[ModelCapability] {
-        &self.capabilities
-    }
-
-    /// `/api/chat` accepts tools. A model without tool support returns an HTTP
-    /// error, which the router treats as a provider failure and falls back.
-    fn supports_tool_use(&self) -> bool {
-        true
-    }
-
-    async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse, InferenceError> {
-        let model = self.resolve_model(request).ok_or_else(|| {
-            InferenceError::ProviderUnavailable(format!(
-                "No local model available for capability {:?}",
-                request.capability
-            ))
-        })?;
-
+    /// One `/api/chat` call, native or emulated.
+    async fn chat(
+        &self,
+        request: &ModelRequest,
+        model: &str,
+        emulate: bool,
+    ) -> Result<ModelResponse, InferenceError> {
+        let (messages, tools) = if emulate {
+            (Self::turns_to_messages(tool_emulation::to_emulated_turns(request)), Vec::new())
+        } else {
+            (Self::build_messages(request), Self::build_tools(&request.tools))
+        };
         let body = OllamaChatRequest {
-            model: model.clone(),
-            messages: Self::build_messages(request),
-            tools: Self::build_tools(&request.tools),
+            model: model.to_string(),
+            messages,
+            tools,
             stream: false,
             options: self.options(request),
         };
@@ -349,17 +358,22 @@ impl ModelProvider for OllamaProvider {
                 message: e.to_string(),
             })?;
 
-        let tool_calls = Self::parse_tool_calls(parsed.message.tool_calls);
+        let (content, tool_calls) = if emulate {
+            let known: HashSet<&str> = request.tools.iter().map(|t| t.name.as_str()).collect();
+            tool_emulation::parse_reply(&parsed.message.content, &known)
+        } else {
+            (parsed.message.content, Self::parse_tool_calls(parsed.message.tool_calls))
+        };
         let stop_reason = Self::stop_reason(parsed.done_reason.as_deref(), !tool_calls.is_empty());
 
         Ok(ModelResponse {
-            content: parsed.message.content,
+            content,
             tool_calls,
             stop_reason,
             capability: request.capability.clone(),
             metadata: ExecutionMetadata {
                 provider_id: "ollama".into(),
-                model_id: model,
+                model_id: model.to_string(),
                 tier: ModelTier::Local,
                 latency_ms: 0, // filled by Router
                 tokens_used: parsed.eval_count.unwrap_or(0),
@@ -370,6 +384,74 @@ impl ModelProvider for OllamaProvider {
             },
             request_id: request.request_id.clone(),
         })
+    }
+
+    fn stop_reason(done_reason: Option<&str>, has_tool_calls: bool) -> StopReason {
+        if has_tool_calls {
+            return StopReason::ToolUse;
+        }
+        match done_reason {
+            None | Some("stop") => StopReason::EndTurn,
+            Some("length") => StopReason::MaxTokens,
+            Some(_) => StopReason::Other,
+        }
+    }
+}
+
+/// Whether a failed native tool request should be retried in emulation:
+/// only in `auto` mode, and only for Ollama's "does not support tools" error.
+fn falls_back_to_emulation(mode: OllamaToolMode, emulated: bool, error: &InferenceError) -> bool {
+    mode == OllamaToolMode::Auto
+        && !emulated
+        && matches!(error, InferenceError::ApiError { message, .. }
+            if tool_emulation::is_tools_unsupported_error(message))
+}
+
+impl OllamaMessage {
+    fn plain(role: &'static str, content: String) -> Self {
+        Self { role, content, tool_calls: Vec::new(), tool_name: None }
+    }
+}
+
+#[async_trait]
+impl ModelProvider for OllamaProvider {
+    fn provider_id(&self) -> &str {
+        "ollama"
+    }
+
+    fn tier(&self) -> ModelTier {
+        ModelTier::Local
+    }
+
+    fn supported_capabilities(&self) -> &[ModelCapability] {
+        &self.capabilities
+    }
+
+    /// Always true: a model without native tool support is served by
+    /// emulation (see the module docs).
+    fn supports_tool_use(&self) -> bool {
+        true
+    }
+
+    async fn infer(&self, request: &ModelRequest) -> Result<ModelResponse, InferenceError> {
+        let model = self.resolve_model(request).ok_or_else(|| {
+            InferenceError::ProviderUnavailable(format!(
+                "No local model available for capability {:?}",
+                request.capability
+            ))
+        })?;
+
+        let emulate = !request.tools.is_empty() && self.emulates(&model);
+        match self.chat(request, &model, emulate).await {
+            Err(e) if !request.tools.is_empty() && falls_back_to_emulation(self.tool_mode, emulate, &e) => {
+                info!(model = %model, "Ollama model has no native tool support; emulating tool calls");
+                if let Ok(mut set) = self.emulated_models.lock() {
+                    set.insert(model.clone());
+                }
+                self.chat(request, &model, true).await
+            }
+            other => other,
+        }
     }
 
     async fn stream(
@@ -576,5 +658,157 @@ mod tests {
         assert_eq!(calls[0].arguments, json!({ "dir": "." }));
         assert_eq!(OllamaProvider::stop_reason(Some("stop"), true), StopReason::ToolUse);
         assert_eq!(OllamaProvider::stop_reason(Some("length"), false), StopReason::MaxTokens);
+    }
+
+
+    #[test]
+    fn fallback_only_on_unsupported_tools_in_auto_mode() {
+        let unsupported = InferenceError::ApiError {
+            provider: "ollama".into(),
+            message: "HTTP 400 Bad Request: {\"error\":\"gemma2:2b does not support tools\"}".into(),
+        };
+        let other = InferenceError::ApiError { provider: "ollama".into(), message: "HTTP 500: boom".into() };
+        assert!(falls_back_to_emulation(OllamaToolMode::Auto, false, &unsupported));
+        assert!(!falls_back_to_emulation(OllamaToolMode::Auto, true, &unsupported));
+        assert!(!falls_back_to_emulation(OllamaToolMode::Native, false, &unsupported));
+        assert!(!falls_back_to_emulation(OllamaToolMode::Auto, false, &other));
+        assert!(!falls_back_to_emulation(
+            OllamaToolMode::Auto,
+            false,
+            &InferenceError::ProviderUnavailable("does not support tools".into())
+        ));
+    }
+
+    #[test]
+    fn tool_mode_decides_emulation_up_front() {
+        let provider = |mode| test_provider("http://unused".into()).with_tool_mode(mode);
+        assert!(!provider(OllamaToolMode::Native).emulates("m"));
+        assert!(provider(OllamaToolMode::Emulated).emulates("m"));
+        let auto = provider(OllamaToolMode::Auto);
+        assert!(!auto.emulates("m"));
+        auto.emulated_models.lock().unwrap().insert("m".into());
+        assert!(auto.emulates("m"));
+        assert!(!auto.emulates("other"));
+    }
+
+    fn test_provider(base_url: String) -> OllamaProvider {
+        OllamaProvider::with_model_override(
+            base_url,
+            LocalModelRegistry { available: vec![] },
+            ProfileRegistry::with_defaults(),
+            Some("tiny".into()),
+        )
+    }
+
+    type Seen = std::sync::Arc<Mutex<Vec<serde_json::Value>>>;
+
+    /// A one-request-per-connection HTTP server standing in for Ollama: it
+    /// rejects bodies that carry `tools` the way Ollama does for a model
+    /// without tool support, and answers others with an emulated call.
+    async fn fake_ollama() -> (String, Seen) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen: Seen = Default::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let body = loop {
+                    let n = sock.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        break None;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    if let Some(head_end) = text.find("\r\n\r\n") {
+                        let len = text[..head_end]
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                if k.eq_ignore_ascii_case("content-length") {
+                                    v.trim().parse::<usize>().ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= head_end + 4 + len {
+                            break Some(buf[head_end + 4..head_end + 4 + len].to_vec());
+                        }
+                    }
+                };
+                let Some(body) = body else { continue };
+                let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let (status, reply) = if json.get("tools").is_some() {
+                    (
+                        "400 Bad Request",
+                        json!({ "error": "registry.ollama.ai/library/tiny:latest does not support tools" }),
+                    )
+                } else {
+                    (
+                        "200 OK",
+                        json!({
+                            "message": {
+                                "role": "assistant",
+                                "content": "Reading it.\n```json\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"b.rs\"}}\n```"
+                            },
+                            "done_reason": "stop",
+                            "eval_count": 3
+                        }),
+                    )
+                };
+                log.lock().unwrap().push(json);
+                let payload = reply.to_string();
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        (url, seen)
+    }
+
+    #[tokio::test]
+    async fn auto_mode_retries_unsupported_model_in_emulation_and_remembers_it() {
+        let (url, seen) = fake_ollama().await;
+        let provider = test_provider(url);
+        let req = tool_loop_request();
+
+        let resp = provider.infer(&req).await.unwrap();
+        assert_eq!(resp.content, "Reading it.");
+        assert_eq!(resp.stop_reason, StopReason::ToolUse);
+        assert_eq!(resp.tool_calls.len(), 1);
+        assert_eq!(resp.tool_calls[0].name, "read_file");
+        assert_eq!(resp.tool_calls[0].arguments, json!({ "path": "b.rs" }));
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2, "native attempt, then emulated retry");
+            assert!(seen[0].get("tools").is_some());
+            let retry = &seen[1];
+            assert!(retry.get("tools").is_none());
+            let system = retry["messages"][0]["content"].as_str().unwrap();
+            assert!(system.starts_with("sys\n\n# Tools") && system.contains("### read_file"));
+            // Earlier calls and results are replayed as text, not native fields.
+            assert!(retry["messages"][2].get("tool_calls").is_none());
+            assert!(retry["messages"][2]["content"].as_str().unwrap().contains("```json"));
+            assert_eq!(retry["messages"][3]["role"], "user");
+        }
+
+        // The model is remembered: the next request goes straight to emulation.
+        provider.infer(&req).await.unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn native_mode_reports_the_error_without_retrying() {
+        let (url, seen) = fake_ollama().await;
+        let provider = test_provider(url).with_tool_mode(OllamaToolMode::Native);
+        let err = provider.infer(&tool_loop_request()).await.unwrap_err();
+        assert!(matches!(&err, InferenceError::ApiError { message, .. } if message.contains("does not support tools")));
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 }
