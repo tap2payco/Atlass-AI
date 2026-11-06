@@ -79,6 +79,7 @@ pub async fn run_server(port: u16) -> Result<(), String> {
     println!("│ Web UI URL:  http://localhost:{}                             │", port);
     println!("│ API Endpoint: http://localhost:{}/api/link                  │", port);
     println!("│ API Endpoint: http://localhost:{}/api/chat                  │", port);
+    println!("│ API Endpoint: http://localhost:{}/api/agent (streams)       │", port);
     println!("╰─────────────────────────────────────────────────────────────╯\n");
 
     loop {
@@ -184,6 +185,11 @@ pub async fn run_server(port: u16) -> Result<(), String> {
                         return;
                     }
                 }
+            } else if url == "/api/agent" && method == "POST" {
+                // Run the turn through the agent (read-only tools) and stream
+                // protocol events as JSON lines.
+                agent_chat(&mut socket, body, cors_headers).await;
+                return;
             } else if url == "/api/chat" && method == "POST" {
                 let chat_req: std::result::Result<ChatRequest, _> = serde_json::from_str(body);
                 match chat_req {
@@ -372,4 +378,75 @@ pub async fn run_server(port: u16) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct AgentChatRequest {
+    prompt: String,
+    path: Option<String>,
+    /// A saved session to continue: `last`, a full id or an id prefix.
+    session: Option<String>,
+}
+
+/// `POST /api/agent`: `{"prompt", "path"?, "session"?}`. Answers with
+/// `application/x-ndjson`, one `runtime_agent::protocol::Event` per line,
+/// ending after `turn_complete` (or an `error` when the request is
+/// unusable). Tools are read-only, so no approvals are needed. Closing the
+/// connection interrupts the turn.
+async fn agent_chat(socket: &mut tokio::net::TcpStream, body: &str, cors_headers: &str) {
+    use crate::agent::serve::ProtocolAgent;
+    use crate::agent::{Access, ApprovalMode};
+    use runtime_agent::protocol::{encode_line, Event, Op};
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nCache-Control: no-cache\r\nConnection: close\r\n{}\r\n",
+        cors_headers
+    );
+    if socket.write_all(header.as_bytes()).await.is_err() {
+        return;
+    }
+    let fail = |message: String| encode_line(&Event::Error { message });
+
+    let request: AgentChatRequest = match serde_json::from_str(body) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = socket.write_all(fail(format!("Invalid JSON: {e}")).as_bytes()).await;
+            return;
+        }
+    };
+    let root = request.path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let agent = match ProtocolAgent::from_env(&root, runtime_agent::DEFAULT_MAX_TURNS, Access::Read, ApprovalMode::Auto).await {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = socket.write_all(fail(e).as_bytes()).await;
+            return;
+        }
+    };
+    let resume = match request.session.as_deref().map(|q| agent.find_session(q)).transpose() {
+        Ok(id) => id,
+        Err(e) => {
+            let _ = socket.write_all(fail(e).as_bytes()).await;
+            return;
+        }
+    };
+    let mut driver = agent.into_driver();
+    if let Some(id) = resume {
+        driver = driver.with_session(id);
+    }
+    let (ops, mut events) = driver.spawn();
+    let _ = ops.send(Op::TurnInput { session: None, text: request.prompt });
+
+    let mut connected = true;
+    while let Some(event) = events.recv().await {
+        let done = matches!(event, Event::TurnComplete { .. });
+        if connected && socket.write_all(encode_line(&event).as_bytes()).await.is_err() {
+            connected = false;
+            let _ = ops.send(Op::Interrupt);
+        }
+        if done {
+            break;
+        }
+    }
+    // Ends the driver; a turn that never started (bad session) ends here too.
+    drop(ops);
 }

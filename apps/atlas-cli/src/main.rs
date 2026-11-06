@@ -23,7 +23,7 @@ enum Commands {
     /// Ask the tool-using agent to look at or work on a project (Ctrl+C cancels).
     Agent {
         /// The request, e.g. "Where is the cache key computed?"
-        #[arg(required = true, num_args = 1..)]
+        #[arg(required_unless_present = "serve_stdio", num_args = 1..)]
         prompt: Vec<String>,
         /// Project directory. Defaults to the current directory.
         #[arg(long)]
@@ -42,6 +42,10 @@ enum Commands {
         /// session id (the first 8 characters are enough).
         #[arg(long)]
         resume: Option<String>,
+        /// Instead of one prompt, speak the agent protocol as JSON lines on
+        /// stdin/stdout (ops in, events out), e.g. for atlas-dashboard.
+        #[arg(long)]
+        serve_stdio: bool,
     },
     Query {
         #[arg(short, long, default_value = "memory")]
@@ -64,7 +68,15 @@ async fn main() -> ExitCode {
         Some(Commands::Boot) => commands::boot::execute_boot().await,
         Some(Commands::Status) => commands::status::execute_status().await,
         Some(Commands::Run { prompt }) => commands::agent_run::execute_agent_run(prompt).await,
-        Some(Commands::Agent { prompt, path, max_turns, access, approve, resume }) => {
+        Some(Commands::Agent { path, max_turns, access, approve, resume, serve_stdio: true, .. }) => {
+            match path.clone().map(Ok).unwrap_or_else(|| std::env::current_dir().map_err(|e| e.to_string())) {
+                Ok(root) => {
+                    atlas_cli::agent::serve::serve_stdio(&root, *max_turns, *access, *approve, resume.as_deref()).await
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Some(Commands::Agent { prompt, path, max_turns, access, approve, resume, .. }) => {
             run_agent_once(&prompt.join(" "), path.clone(), *max_turns, *access, *approve, resume.as_deref()).await
         }
         Some(Commands::Query { domain, query }) => commands::query::execute_query(domain, query).await,

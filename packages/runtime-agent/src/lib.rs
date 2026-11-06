@@ -41,6 +41,7 @@ pub mod file_store;
 pub mod machine;
 pub mod operation;
 pub mod ops;
+pub mod protocol;
 pub mod session;
 pub mod tool;
 
