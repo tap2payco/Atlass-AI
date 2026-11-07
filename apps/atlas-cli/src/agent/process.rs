@@ -153,7 +153,7 @@ impl Drop for ProcessTree {
 }
 
 #[cfg(windows)]
-mod windows {
+pub(crate) mod windows {
     use std::ffi::c_void;
     use std::os::windows::io::RawHandle;
 

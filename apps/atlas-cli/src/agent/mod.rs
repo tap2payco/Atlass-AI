@@ -110,7 +110,7 @@ const RETRY_HINT: &str =
     "In the REPL your message is kept: type `continue` to retry. Otherwise, run the command again.";
 
 /// Session metadata key holding the workspace a session belongs to.
-const WORKSPACE_KEY: &str = "workspace";
+pub(crate) const WORKSPACE_KEY: &str = "workspace";
 
 /// Where saved conversations live: `$ATLAS_HOME/sessions`, else the
 /// per-user data directory (`%LOCALAPPDATA%\atlas\sessions` on Windows,

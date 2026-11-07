@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Atlas</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234338ca'/%3E%3Cpath d='M9 23 16 8l7 15M11.8 17.5h8.4' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <link rel="stylesheet" href="atlas.css">
+  <script>
+    // Apply the saved theme before first paint.
+    try {
+      const t = localStorage.getItem('atlas.theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2.2h8.6A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17h-8.5L6 20.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15H17"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></symbol>
+      <symbol id="i-read" viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z"/><path d="M14 3.5V8h4M9.5 12h5M9.5 15.5h5"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4 4"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="m14.5 7.5 3 3"/></symbol>
+      <symbol id="i-run" viewBox="0 0 24 24"><path d="m6 8 4 4-4 4M12 17h6"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app" id="app">
+    <!-- Sidebar: project and conversations -->
+    <aside class="sidebar" id="sidebar" aria-label="Project and conversations">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M9 23 16 8l7 15M11.8 17.5h8.4"/></svg>
+        </span>
+        <span class="brand-name">Atlas</span>
+        <button class="icon-btn sidebar-close" id="sidebar-close" aria-label="Close sidebar"><svg><use href="#i-close"/></svg></button>
+      </div>
+
+      <button class="project" id="project-btn" title="Change project folder">
+        <svg class="project-icon"><use href="#i-folder"/></svg>
+        <span class="project-text">
+          <span class="project-name" id="project-name">Loading…</span>
+          <span class="project-path" id="project-path"></span>
+        </span>
+      </button>
+
+      <button class="new-chat" id="new-chat">
+        <svg><use href="#i-plus"/></svg>
+        New conversation
+      </button>
+
+      <nav class="history" aria-label="Saved conversations">
+        <h2 class="history-heading">Conversations</h2>
+        <ul class="history-list" id="history-list"></ul>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="model" id="model-info" title="Model in use">
+          <span class="model-dot" aria-hidden="true"></span>
+          <span id="model-name">—</span>
+        </div>
+        <button class="icon-btn theme-btn" id="theme-btn" aria-label="Theme: system">
+          <svg><use href="#i-monitor"/></svg>
+        </button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <!-- Main: conversation -->
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open sidebar"><svg><use href="#i-menu"/></svg></button>
+        <div class="title-wrap">
+          <h1 class="conv-title" id="conv-title">New conversation</h1>
+          <span class="conv-meta" id="conv-meta"></span>
+        </div>
+        <div class="topbar-actions">
+          <div class="segmented" role="radiogroup" aria-label="What the agent may do">
+            <button role="radio" aria-checked="true" data-access="read" class="seg">
+              <svg><use href="#i-read"/></svg><span>Read only</span>
+            </button>
+            <button role="radio" aria-checked="false" data-access="write" class="seg">
+              <svg><use href="#i-shield"/></svg><span>Ask before edits</span>
+            </button>
+          </div>
+          <button class="icon-btn" id="terminal-toggle" aria-pressed="false" aria-label="Show terminal" title="Terminal (Ctrl+`)"><svg><use href="#i-terminal"/></svg></button>
+          <button class="icon-btn" id="panel-toggle" aria-pressed="false" aria-label="Show details panel" title="Details"><svg><use href="#i-panel"/></svg></button>
+        </div>
+      </header>
+
+      <div class="scroller" id="scroller">
+        <div class="thread" id="thread">
+          <section class="empty" id="empty">
+            <h2 class="empty-title">What should we work on in <span id="empty-project">this project</span>?</h2>
+            <p class="empty-sub">Atlas reads and searches your code to answer. With <b>Ask before edits</b> on, it can change files too, and each change waits for your approval here.</p>
+            <div class="starters" id="starters">
+              <button class="starter" data-prompt="Give me a tour of this project: the main parts and how they fit together.">Give me a tour of this project</button>
+              <button class="starter" data-prompt="Find where errors are handled badly or swallowed, and list the worst cases with file paths.">Find weak error handling</button>
+              <button class="starter" data-prompt="What changed recently in this repository, and what looks unfinished?">What changed recently?</button>
+              <button class="starter" data-prompt="Which parts of this project have no tests? Suggest the three most valuable tests to add.">Where are tests missing?</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="Ask Atlas about this project…" aria-label="Message"></textarea>
+          <div class="composer-row">
+            <span class="composer-hint" id="composer-hint">Enter to send · Shift+Enter for a new line</span>
+            <button type="submit" class="send" id="send" aria-label="Send"><svg><use href="#i-send"/></svg></button>
+          </div>
+        </div>
+      </form>
+    </main>
+
+    <!-- Side panel: terminal and details -->
+    <aside class="panel" id="panel" hidden aria-label="Side panel">
+      <div class="panel-tabs" role="tablist">
+        <button role="tab" class="panel-tab" id="tab-terminal" aria-selected="true" data-tab="terminal">
+          <svg><use href="#i-terminal"/></svg>Terminal
+        </button>
+        <button role="tab" class="panel-tab" id="tab-details" aria-selected="false" data-tab="details">
+          <svg><use href="#i-list"/></svg>Details
+        </button>
+        <button class="icon-btn panel-close" id="panel-close" aria-label="Close panel"><svg><use href="#i-close"/></svg></button>
+      </div>
+
+      <section class="pane pane-terminal" id="pane-terminal" role="tabpanel">
+        <div class="term-bar">
+          <div class="term-tabs" id="term-tabs"></div>
+          <button class="icon-btn small" id="term-new" aria-label="New terminal" title="New terminal"><svg><use href="#i-plus"/></svg></button>
+        </div>
+        <div class="term-host" id="term-host">
+          <div class="term-empty" id="term-empty">
+            <p>A real shell in your project folder, the same one you'd open in your own terminal.</p>
+            <button class="btn" id="term-start"><svg><use href="#i-terminal"/></svg>Open terminal</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane pane-details" id="pane-details" role="tabpanel" hidden>
+        <div class="details-empty" id="details-empty">Select a step in the conversation to see exactly what it did.</div>
+        <div class="details" id="details" hidden></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <script src="atlas.js"></script>
+</body>
+</html>

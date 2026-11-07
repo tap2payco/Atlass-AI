@@ -57,6 +57,18 @@ enum Commands {
         #[arg(short, long, default_value_t = 8080)]
         port: u16,
     },
+    /// Open the Atlas app in your browser: the same agent and saved
+    /// conversations as `atlas agent`, with approvals and diffs in the page.
+    Ui {
+        /// Project directory. Defaults to the current directory.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(short, long, default_value_t = 8080)]
+        port: u16,
+        /// Start the server without opening a browser.
+        #[arg(long)]
+        no_open: bool,
+    },
     Repl,
 }
 
@@ -81,6 +93,9 @@ async fn main() -> ExitCode {
         }
         Some(Commands::Query { domain, query }) => commands::query::execute_query(domain, query).await,
         Some(Commands::Server { port }) => atlas_cli::server::run_server(*port).await,
+        Some(Commands::Ui { path, port, no_open }) => {
+            atlas_cli::server::run_server_with(*port, path.clone(), !*no_open).await
+        }
         Some(Commands::Repl) | None => repl::run_repl().await,
     };
 

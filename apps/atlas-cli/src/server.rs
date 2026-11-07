@@ -68,10 +68,51 @@ struct ChatResponse {
     error: Option<String>,
 }
 
+/// Reads one HTTP request: the head, then as much body as `Content-Length`
+/// announces (at most 1 MiB).
+async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Vec<u8>> {
+    const MAX: usize = 1 << 20;
+    let mut data = Vec::new();
+    let mut buf = vec![0u8; 8192];
+    loop {
+        let n = socket.read(&mut buf).await.ok()?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        if let Some(head_end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&data[..head_end]).to_ascii_lowercase();
+            let length = head
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(0)
+                .min(MAX);
+            if data.len() >= head_end + 4 + length {
+                break;
+            }
+        }
+        if data.len() > MAX + 16 * 1024 {
+            return None;
+        }
+    }
+    (!data.is_empty()).then_some(data)
+}
+
 pub async fn run_server(port: u16) -> Result<(), String> {
+    run_server_with(port, None, false).await
+}
+
+/// `atlas ui`: serve the app for `project` and open it in the browser.
+pub async fn run_server_with(port: u16, project: Option<PathBuf>, open: bool) -> Result<(), String> {
+    let project = project.unwrap_or_else(|| PathBuf::from("."));
+    crate::web_agent::set_default_project(&project)?;
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr).await
         .map_err(|e| format!("Failed to bind server to {}: {}", addr, e))?;
+    if open {
+        crate::web_agent::open_in_browser(&format!("http://localhost:{port}/"));
+    }
 
     println!("╭─────────────────────────────────────────────────────────────╮");
     println!("│ 🚀 Atlas Local Web Daemon HTTP API Server Running           │");
@@ -89,13 +130,8 @@ pub async fn run_server(port: u16) -> Result<(), String> {
         };
 
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 8192];
-            let bytes_read = match socket.read(&mut buf).await {
-                Ok(n) if n > 0 => n,
-                _ => return,
-            };
-
-            let req_str = String::from_utf8_lossy(&buf[..bytes_read]);
+            let Some(raw) = read_request(&mut socket).await else { return };
+            let req_str = String::from_utf8_lossy(&raw);
             let lines: Vec<&str> = req_str.lines().collect();
             if lines.is_empty() { return; }
 
@@ -105,11 +141,18 @@ pub async fn run_server(port: u16) -> Result<(), String> {
             let method = first_line_parts[0];
             let url = first_line_parts[1];
 
-            let cors_headers = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
-
+            // The page is served from this server, so the API is same-origin
+            // only: no CORS headers, and requests from any other origin are
+            // refused, so a website open in the browser cannot read the
+            // project or drive the agent.
+            let cors_headers = "";
             if method == "OPTIONS" {
-                let resp = format!("HTTP/1.1 204 No Content\r\n{}\r\n", cors_headers);
-                let _ = socket.write_all(resp.as_bytes()).await;
+                let _ = socket.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n").await;
+                return;
+            }
+            let route = url.split('?').next().unwrap_or(url);
+            if route.starts_with("/api/") && !crate::web_agent::origin_allowed(&req_str, port) {
+                crate::web_agent::forbidden(&mut socket).await;
                 return;
             }
 
@@ -185,10 +228,37 @@ pub async fn run_server(port: u16) -> Result<(), String> {
                         return;
                     }
                 }
-            } else if url == "/api/agent" && method == "POST" {
-                // Run the turn through the agent (read-only tools) and stream
-                // protocol events as JSON lines.
-                agent_chat(&mut socket, body, cors_headers).await;
+            } else if route == "/api/agent" && method == "POST" {
+                // Run the turn through the agent and stream protocol events
+                // as JSON lines.
+                crate::web_agent::run_turn(&mut socket, body).await;
+                return;
+            } else if route == "/api/agent/approve" && method == "POST" {
+                crate::web_agent::approve(&mut socket, body).await;
+                return;
+            } else if route == "/api/agent/interrupt" && method == "POST" {
+                crate::web_agent::interrupt(&mut socket, body).await;
+                return;
+            } else if route == "/api/terminal" && method == "POST" {
+                crate::web_agent::terminal_open(&mut socket, body).await;
+                return;
+            } else if route == "/api/terminal/stream" && method == "GET" {
+                crate::web_agent::terminal_stream(&mut socket, url).await;
+                return;
+            } else if route == "/api/terminal/input" && method == "POST" {
+                crate::web_agent::terminal_input(&mut socket, body).await;
+                return;
+            } else if route == "/api/terminal/close" && method == "POST" {
+                crate::web_agent::terminal_close(&mut socket, body).await;
+                return;
+            } else if route == "/api/info" && method == "GET" {
+                crate::web_agent::info(&mut socket).await;
+                return;
+            } else if route == "/api/sessions" && method == "GET" {
+                crate::web_agent::list_sessions(&mut socket, url).await;
+                return;
+            } else if route == "/api/session" && method == "GET" {
+                crate::web_agent::get_session(&mut socket, url).await;
                 return;
             } else if url == "/api/chat" && method == "POST" {
                 let chat_req: std::result::Result<ChatRequest, _> = serde_json::from_str(body);
@@ -346,23 +416,28 @@ pub async fn run_server(port: u16) -> Result<(), String> {
                 }
             } else {
                 // Static file serving fallback
-                let clean_url = url.split('?').next().unwrap_or(url);
-                let file_path = if clean_url == "/" || clean_url == "/chat.html" {
-                    PathBuf::from("apps/atlas-dashboard/chat.html")
-                } else if clean_url == "/index.html" {
-                    PathBuf::from("apps/atlas-dashboard/index.html")
+                let clean_url = route;
+                // Only files inside the dashboard folder are served.
+                if clean_url.contains("..") || clean_url.contains('\\') || clean_url.contains(':') {
+                    let _ = socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n404 Not Found").await;
+                    return;
+                }
+                let dashboard = crate::web_agent::dashboard_dir();
+                let file_path = if clean_url == "/" {
+                    dashboard.join("atlas.html")
                 } else {
-                    PathBuf::from(format!("apps/atlas-dashboard/{}", clean_url.trim_start_matches('/')))
+                    dashboard.join(clean_url.trim_start_matches('/'))
                 };
 
                 if file_path.exists() && file_path.is_file() {
                     if let Ok(content) = fs::read(&file_path) {
-                        let mime = if file_path.extension().and_then(|e| e.to_str()) == Some("css") {
-                            "text/css"
-                        } else if file_path.extension().and_then(|e| e.to_str()) == Some("js") {
-                            "application/javascript"
-                        } else {
-                            "text/html"
+                        let mime = match file_path.extension().and_then(|e| e.to_str()) {
+                            Some("css") => "text/css; charset=utf-8",
+                            Some("js") => "application/javascript; charset=utf-8",
+                            Some("svg") => "image/svg+xml",
+                            Some("png") => "image/png",
+                            Some("json") => "application/json",
+                            _ => "text/html; charset=utf-8",
                         };
                         let http_resp = format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}\r\n", mime, content.len(), cors_headers);
                         let _ = socket.write_all(http_resp.as_bytes()).await;
@@ -380,73 +455,3 @@ pub async fn run_server(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct AgentChatRequest {
-    prompt: String,
-    path: Option<String>,
-    /// A saved session to continue: `last`, a full id or an id prefix.
-    session: Option<String>,
-}
-
-/// `POST /api/agent`: `{"prompt", "path"?, "session"?}`. Answers with
-/// `application/x-ndjson`, one `runtime_agent::protocol::Event` per line,
-/// ending after `turn_complete` (or an `error` when the request is
-/// unusable). Tools are read-only, so no approvals are needed. Closing the
-/// connection interrupts the turn.
-async fn agent_chat(socket: &mut tokio::net::TcpStream, body: &str, cors_headers: &str) {
-    use crate::agent::serve::ProtocolAgent;
-    use crate::agent::{Access, ApprovalMode};
-    use runtime_agent::protocol::{encode_line, Event, Op};
-
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nCache-Control: no-cache\r\nConnection: close\r\n{}\r\n",
-        cors_headers
-    );
-    if socket.write_all(header.as_bytes()).await.is_err() {
-        return;
-    }
-    let fail = |message: String| encode_line(&Event::Error { message });
-
-    let request: AgentChatRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = socket.write_all(fail(format!("Invalid JSON: {e}")).as_bytes()).await;
-            return;
-        }
-    };
-    let root = request.path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    let agent = match ProtocolAgent::from_env(&root, runtime_agent::DEFAULT_MAX_TURNS, Access::Read, ApprovalMode::Auto).await {
-        Ok(a) => a,
-        Err(e) => {
-            let _ = socket.write_all(fail(e).as_bytes()).await;
-            return;
-        }
-    };
-    let resume = match request.session.as_deref().map(|q| agent.find_session(q)).transpose() {
-        Ok(id) => id,
-        Err(e) => {
-            let _ = socket.write_all(fail(e).as_bytes()).await;
-            return;
-        }
-    };
-    let mut driver = agent.into_driver();
-    if let Some(id) = resume {
-        driver = driver.with_session(id);
-    }
-    let (ops, mut events) = driver.spawn();
-    let _ = ops.send(Op::TurnInput { session: None, text: request.prompt });
-
-    let mut connected = true;
-    while let Some(event) = events.recv().await {
-        let done = matches!(event, Event::TurnComplete { .. });
-        if connected && socket.write_all(encode_line(&event).as_bytes()).await.is_err() {
-            connected = false;
-            let _ = ops.send(Op::Interrupt);
-        }
-        if done {
-            break;
-        }
-    }
-    // Ends the driver; a turn that never started (bad session) ends here too.
-    drop(ops);
-}
