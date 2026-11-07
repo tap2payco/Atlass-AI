@@ -5,6 +5,7 @@ pub mod approval;
 pub mod command;
 pub mod policy;
 pub mod process;
+pub mod serve;
 pub mod tools;
 pub mod write_tools;
 
