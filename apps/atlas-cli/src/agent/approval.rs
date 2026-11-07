@@ -7,9 +7,12 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use platform_contracts::policy::ApprovalPolicy;
 use runtime_agent::{ApprovalDecision, AutoApprove, ToolApprover, ToolEffect};
 use serde_json::Value;
 use shared::model::ToolCall;
+
+use super::policy::needs_approval;
 
 /// Whether the agent must ask before acting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,9 +46,32 @@ impl fmt::Display for ApprovalMode {
 }
 
 pub fn approver_for(mode: ApprovalMode, console: &Arc<ConsoleApprover>) -> Arc<dyn ToolApprover> {
-    match mode {
-        ApprovalMode::Ask => console.clone(),
-        ApprovalMode::Auto => Arc::new(AutoApprove),
+    approver_for_policy(mode.approval_policy(), console)
+}
+
+/// The approver for an approval policy: asks `console` only for the calls
+/// the policy says need approval (see `policy::needs_approval`).
+pub fn approver_for_policy(policy: ApprovalPolicy, console: &Arc<ConsoleApprover>) -> Arc<dyn ToolApprover> {
+    match policy {
+        ApprovalPolicy::Never => Arc::new(AutoApprove),
+        policy => Arc::new(PolicyApprover { policy, ask: console.clone() }),
+    }
+}
+
+/// Lets through what `policy` does not require approval for; asks `ask` otherwise.
+pub struct PolicyApprover {
+    policy: ApprovalPolicy,
+    ask: Arc<dyn ToolApprover>,
+}
+
+#[async_trait]
+impl ToolApprover for PolicyApprover {
+    async fn approve(&self, call: &ToolCall, effect: ToolEffect) -> ApprovalDecision {
+        if needs_approval(self.policy, effect) {
+            self.ask.approve(call, effect).await
+        } else {
+            ApprovalDecision::Allow
+        }
     }
 }
 
@@ -201,6 +227,26 @@ mod tests {
             arguments: json!({ "path": "big.txt", "content": long }),
         };
         assert!(describe_for_approval(&write).contains("… 12 more lines"));
+    }
+
+    struct Refuse;
+
+    #[async_trait]
+    impl ToolApprover for Refuse {
+        async fn approve(&self, _: &ToolCall, _: ToolEffect) -> ApprovalDecision {
+            ApprovalDecision::Deny { reason: "asked".into() }
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_approver_only_asks_when_the_policy_requires_it() {
+        let call = ToolCall { id: "1".into(), name: "edit_file".into(), arguments: json!({}) };
+        let on_request = PolicyApprover { policy: ApprovalPolicy::OnRequest, ask: Arc::new(Refuse) };
+        assert_eq!(on_request.approve(&call, ToolEffect::WritesWorkspace).await, ApprovalDecision::Allow);
+        assert!(matches!(on_request.approve(&call, ToolEffect::RunsProcesses).await, ApprovalDecision::Deny { .. }));
+        let untrusted = PolicyApprover { policy: ApprovalPolicy::Untrusted, ask: Arc::new(Refuse) };
+        assert!(matches!(untrusted.approve(&call, ToolEffect::WritesWorkspace).await, ApprovalDecision::Deny { .. }));
+        assert_eq!(untrusted.approve(&call, ToolEffect::ReadOnly).await, ApprovalDecision::Allow);
     }
 
     #[test]

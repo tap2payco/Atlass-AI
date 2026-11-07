@@ -1,8 +1,10 @@
 //! Tools that modify files in the workspace: `write_file` and `edit_file`.
 //!
-//! Paths go through `Workspace::resolve_for_write`, so the agent cannot write
-//! outside the project or anywhere under `.git`. There is no approval prompt
-//! yet (roadmap step 4); the CLI only enables these tools when asked to.
+//! Paths go through `Workspace::resolve_for_write`, which applies the
+//! workspace's sandbox policy: nothing is written under `ReadOnly`, nor
+//! outside the workspace and its writable roots, nor under the protected
+//! subpaths (`.git`, `.atlas`, `.codex`, `.claude`). Whether the user is asked
+//! first is the approver's job (`approval.rs`).
 
 use std::fs;
 use std::sync::Arc;
@@ -158,6 +160,7 @@ impl Tool for EditFile {
 mod tests {
     use super::*;
     use crate::agent::test_support::TempDir;
+    use platform_contracts::policy::SandboxPolicy;
 
     fn setup() -> (TempDir, Workspace, Vec<Arc<dyn Tool>>) {
         let dir = TempDir::new();
@@ -203,6 +206,32 @@ mod tests {
         }
         assert!(!outside.exists());
         assert!(!dir.path().join(".git/hooks/pre-commit").exists());
+    }
+
+    #[tokio::test]
+    async fn protected_paths_and_read_only_policies_refuse_writes() {
+        let (dir, ws, _tools) = setup();
+        fs::create_dir_all(dir.path().join(".atlas")).unwrap();
+        fs::write(dir.path().join(".atlas/policy.toml"), "mode = 'read-only'
+").unwrap();
+        let tools = write_tools(&ws);
+        let err = tool(&tools, "write_file")
+            .call(json!({ "path": ".atlas/policy.toml", "content": "mode = 'danger-full-access'" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("inside .atlas"), "{err}");
+        let err = tool(&tools, "edit_file")
+            .call(json!({ "path": ".atlas/policy.toml", "old_text": "read-only", "new_text": "x" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("inside .atlas"), "{err}");
+        assert_eq!(fs::read_to_string(dir.path().join(".atlas/policy.toml")).unwrap(), "mode = 'read-only'
+");
+
+        let read_only = write_tools(&ws.with_sandbox(SandboxPolicy::ReadOnly));
+        let err = tool(&read_only, "write_file").call(json!({ "path": "c.txt", "content": "x" })).await.unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+        assert!(!dir.path().join("c.txt").exists());
     }
 
     #[tokio::test]

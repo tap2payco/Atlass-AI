@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use platform_contracts::policy::SandboxPolicy;
 use runtime_agent::{Tool, ToolEffect};
 use serde_json::{json, Value};
 use shared::model::ToolSpec;
@@ -21,10 +22,12 @@ const MAX_SEARCH_MATCHES: usize = 100;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_MATCH_LINE_CHARS: usize = 200;
 
-/// The canonical workspace root shared by all tools.
+/// The canonical workspace root shared by all tools, and the sandbox policy
+/// they run under (by default `WorkspaceWrite`).
 #[derive(Debug, Clone)]
 pub struct Workspace {
     root: PathBuf,
+    sandbox: SandboxPolicy,
 }
 
 impl Workspace {
@@ -35,7 +38,16 @@ impl Workspace {
         if !root.is_dir() {
             return Err(format!("workspace {} is not a directory", root.display()));
         }
-        Ok(Self { root })
+        Ok(Self { root, sandbox: SandboxPolicy::default() })
+    }
+
+    /// The same workspace under another sandbox policy.
+    pub fn with_sandbox(&self, sandbox: SandboxPolicy) -> Self {
+        Self { root: self.root.clone(), sandbox }
+    }
+
+    pub fn sandbox(&self) -> &SandboxPolicy {
+        &self.sandbox
     }
 
     pub fn root(&self) -> &Path {
@@ -60,14 +72,19 @@ impl Workspace {
         Ok(resolved)
     }
 
-    /// Resolve a path the agent wants to create or modify. Stricter than
-    /// `resolve`: `..` is not allowed at all, the path may not exist yet but
-    /// its deepest existing ancestor must resolve (through symlinks) inside
-    /// the root, and nothing under `.git` may be written (a write to
-    /// `.git/hooks` would run code outside the agent's control).
+    /// Resolve a path the agent wants to create or modify, as the sandbox
+    /// policy allows. Stricter than `resolve`: `..` is not allowed at all,
+    /// the path may not exist yet but its deepest existing ancestor must
+    /// resolve (through symlinks) inside the workspace or another writable
+    /// root, and nothing under a protected subpath (`.git`, `.atlas`, …) may
+    /// be written: a write to `.git/hooks` would run code outside the
+    /// agent's control. Under `ReadOnly` nothing may be written.
     pub(crate) fn resolve_for_write(&self, relative: &str) -> Result<PathBuf, String> {
         if relative.trim().is_empty() {
             return Err("a path is required".into());
+        }
+        if !self.sandbox.allows_writes() {
+            return Err(format!("cannot write '{relative}': the sandbox policy is read-only"));
         }
         let candidate = self.root.join(relative);
         if candidate.components().any(|c| matches!(c, Component::ParentDir)) {
@@ -91,14 +108,17 @@ impl Workspace {
             resolved.push(name);
         }
 
-        let inside = resolved
-            .strip_prefix(&self.root)
-            .map_err(|_| format!("'{relative}' is outside the workspace"))?;
+        let roots = self.sandbox.writable_roots(&self.root);
+        let inside = roots
+            .iter()
+            .filter_map(|root| root.canonicalize().ok())
+            .find_map(|root| resolved.strip_prefix(&root).ok().map(Path::to_path_buf))
+            .ok_or_else(|| format!("'{relative}' is outside the workspace"))?;
         if inside.as_os_str().is_empty() {
             return Err(format!("'{relative}' is the workspace root, not a file"));
         }
-        if inside.components().any(|c| c.as_os_str().eq_ignore_ascii_case(".git")) {
-            return Err(format!("'{relative}' is inside .git, which the agent may not modify"));
+        if let Some(dir) = self.sandbox.protected_component(&inside) {
+            return Err(format!("'{relative}' is inside {dir}, which the agent may not modify"));
         }
         Ok(resolved)
     }
@@ -417,6 +437,31 @@ mod tests {
         );
         assert_eq!(search.call(json!({ "query": "beta" })).await.unwrap(), "src/lib.rs:2: pub fn Beta() {}");
         assert_eq!(search.call(json!({ "query": "zzz" })).await.unwrap(), "No matches.");
+    }
+
+    #[test]
+    fn writes_follow_the_sandbox_policy() {
+        let (dir, ws) = fixture();
+        assert!(ws.resolve_for_write("src/new.rs").is_ok());
+        for path in [".git/hooks/pre-commit", ".atlas/policy.toml", "sub/.Git/config", ".claude/settings.json"] {
+            let err = ws.resolve_for_write(path).unwrap_err();
+            assert!(err.contains("may not modify"), "{path}: {err}");
+        }
+        let read_only = ws.with_sandbox(SandboxPolicy::ReadOnly);
+        assert!(read_only.resolve_for_write("src/new.rs").unwrap_err().contains("read-only"));
+
+        // An extra writable root accepts absolute paths inside it, still minus protected dirs.
+        let extra = TempDir::new();
+        let wider = ws.with_sandbox(SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![extra.path().to_path_buf()],
+            network_access: false,
+        });
+        let inside_extra = extra.path().join("out.txt").to_string_lossy().to_string();
+        assert!(ws.resolve_for_write(&inside_extra).unwrap_err().contains("outside"));
+        assert!(wider.resolve_for_write(&inside_extra).is_ok());
+        let git_in_extra = extra.path().join(".git/x").to_string_lossy().to_string();
+        assert!(wider.resolve_for_write(&git_in_extra).unwrap_err().contains("may not modify"));
+        drop(dir);
     }
 
     #[tokio::test]

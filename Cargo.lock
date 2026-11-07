@@ -94,6 +94,7 @@ dependencies = [
  "async-trait",
  "clap",
  "execution-core",
+ "libc",
  "platform-contracts",
  "runtime-agent",
  "runtime-context",
@@ -1224,6 +1225,7 @@ name = "platform-contracts"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "uuid",
 ]
 
