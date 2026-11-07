@@ -73,5 +73,12 @@ pub trait Operation: Send + Sync {
         Vec::new()
     }
 
+    /// Called every step before `prompt_parts`, with the freshly loaded
+    /// session. Lets an operation fetch something async (e.g. workspace
+    /// context) that its prompt parts then show. Default: nothing.
+    async fn prepare(&self, _session: &Session) -> Result<(), AgentError> {
+        Ok(())
+    }
+
     async fn run(&self, ctx: &StepContext<'_>) -> Result<OperationResult, AgentError>;
 }

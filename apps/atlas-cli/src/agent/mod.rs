@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use runtime_agent::{
-    Agent, AgentError, AgentEvent, CompactionSettings, EventSink, FileSessionStore,
+    Agent, AgentError, AgentEvent, CognitionSettings, CompactionSettings, GitContext, EventSink, FileSessionStore,
     InMemorySessionStore, InferenceSettings, SessionStore, SessionSummary, StopCause, Tool, TurnOutcome,
 };
 use runtime_model::{ModelRuntime, ModelRuntimeConfig};
@@ -79,6 +79,16 @@ fn tools_for(access: Access, workspace: &Workspace) -> Vec<Arc<dyn Tool>> {
         tools.push(Arc::new(RunCommand::new(workspace)));
     }
     tools
+}
+
+/// `ATLAS_AGENT_COGNITION=1` turns on the cognitive-state prompts;
+/// `=routed` also routes each state to the doc's model capability.
+fn cognition_from_env() -> Option<CognitionSettings> {
+    match std::env::var("ATLAS_AGENT_COGNITION").ok()?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" => Some(CognitionSettings::default()),
+        "routed" => Some(CognitionSettings::default().with_doc_routing()),
+        _ => None,
+    }
 }
 
 const RETRY_HINT: &str =
@@ -285,6 +295,11 @@ impl CliAgent {
         }
         for tool in tools_for(self.access, &self.workspace) {
             builder = builder.tool(tool);
+        }
+        // Branch, status and recent commits in the system prompt (step 7).
+        builder = builder.context(Arc::new(GitContext::new(self.workspace.display_root())));
+        if let Some(cognition) = cognition_from_env() {
+            builder = builder.cognitive(cognition);
         }
         self.agent = builder.build().map_err(|e| e.to_string())?;
         Ok(())
