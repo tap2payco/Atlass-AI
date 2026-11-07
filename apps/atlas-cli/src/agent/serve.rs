@@ -19,7 +19,7 @@ use shared::id::SessionId;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::tools::Workspace;
-use super::{sessions_dir, settings_for, tools_for, Access, ApprovalMode, WORKSPACE_KEY};
+use super::{sessions_dir, settings_for, tools_for, with_context_operations, Access, ApprovalMode, WORKSPACE_KEY};
 
 /// Everything needed to drive an agent for one workspace.
 pub struct ProtocolAgent {
@@ -66,6 +66,7 @@ impl ProtocolAgent {
         for tool in tools_for(access, &workspace) {
             builder = builder.tool(tool);
         }
+        let builder = with_context_operations(builder, &workspace);
         let agent = builder.build().map_err(|e| e.to_string())?;
         let metadata = BTreeMap::from([(WORKSPACE_KEY.to_string(), workspace.display_root())]);
         Ok(Self { agent, broker, metadata, store: saved, workspace: workspace.display_root() })

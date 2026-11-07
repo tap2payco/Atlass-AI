@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use runtime_agent::{
-    Agent, AgentError, AgentEvent, CognitionSettings, CompactionSettings, GitContext, EventSink, FileSessionStore,
+    Agent, AgentBuilder, AgentError, AgentEvent, CognitionSettings, CompactionSettings, GitContext, EventSink, FileSessionStore,
     InMemorySessionStore, InferenceSettings, SessionStore, SessionSummary, StopCause, Tool, TurnOutcome,
 };
 use runtime_model::{ModelRuntime, ModelRuntimeConfig};
@@ -92,6 +92,17 @@ fn cognition_from_env() -> Option<CognitionSettings> {
         "1" | "true" | "on" | "yes" => Some(CognitionSettings::default()),
         "routed" => Some(CognitionSettings::default().with_doc_routing()),
         _ => None,
+    }
+}
+
+/// The context and cognition every Atlas agent gets, whichever client
+/// drives it: git branch, status and recent commits in the system prompt
+/// (step 7), plus cognitive states when `ATLAS_AGENT_COGNITION` is set.
+fn with_context_operations(builder: AgentBuilder, workspace: &Workspace) -> AgentBuilder {
+    let builder = builder.context(Arc::new(GitContext::new(workspace.display_root())));
+    match cognition_from_env() {
+        Some(cognition) => builder.cognitive(cognition),
+        None => builder,
     }
 }
 
@@ -300,11 +311,7 @@ impl CliAgent {
         for tool in tools_for(self.access, &self.workspace) {
             builder = builder.tool(tool);
         }
-        // Branch, status and recent commits in the system prompt (step 7).
-        builder = builder.context(Arc::new(GitContext::new(self.workspace.display_root())));
-        if let Some(cognition) = cognition_from_env() {
-            builder = builder.cognitive(cognition);
-        }
+        builder = with_context_operations(builder, &self.workspace);
         self.agent = builder.build().map_err(|e| e.to_string())?;
         Ok(())
     }
