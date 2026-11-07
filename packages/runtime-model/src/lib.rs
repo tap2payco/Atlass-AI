@@ -65,7 +65,7 @@ use tokio::sync::mpsc;
 use shared::error::InferenceError;
 
 use crate::cache::InferenceCache;
-pub use crate::config::ModelRuntimeConfig;
+pub use crate::config::{ModelRuntimeConfig, OllamaToolMode};
 use crate::domain::{ExecutionMetadata, ModelRequest, ModelResponse};
 use crate::events::ModelEvent;
 use crate::local_model_registry::LocalModelRegistry;
@@ -112,7 +112,8 @@ impl ModelRuntime {
                 profile_registry.clone(),
                 config.ollama_model_override.clone(),
             )
-            .with_num_ctx(config.ollama_num_ctx),
+            .with_num_ctx(config.ollama_num_ctx)
+            .with_tool_mode(config.ollama_tool_mode),
         ));
 
         // Add Fireworks only if an API key is present
